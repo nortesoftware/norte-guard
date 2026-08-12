@@ -1,0 +1,51 @@
+{
+  "name": "norte-guard",
+  "version": "1.0.0",
+  "description": "El copiloto de la cuarentena npm. No te dice espera — te dice qué cambió, por qué es sospechoso, y si ya puedes pasar.",
+  "type": "module",
+  "bin": {
+    "norte-guard": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "bench": "node dist/bench.js",
+    "fp-bench": "node dist/fp-bench.js",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "keywords": [
+    "npm",
+    "security",
+    "supply-chain",
+    "audit",
+    "malware",
+    "dependencies",
+    "cli"
+  ],
+  "license": "MIT",
+  "author": "Norte Software <hola@nortesoftware.dev> (https://nortesoftware.dev)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nortesoftware/norte-guard.git"
+  },
+  "homepage": "https://github.com/nortesoftware/norte-guard#readme",
+  "bugs": {
+    "url": "https://github.com/nortesoftware/norte-guard/issues",
+    "email": "security@nortesoftware.dev"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "dist/",
+    "docs/",
+    "README.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.10"
+  }
+}

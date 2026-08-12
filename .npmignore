@@ -1,0 +1,8 @@
+src/
+test/
+.github/
+*.test.ts
+tsconfig.json
+captures/
+*.ngpack
+.last_seq

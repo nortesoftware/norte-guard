@@ -1,0 +1,18 @@
+node_modules/
+dist/
+captures/
+*.ngpack
+.last_pubdate
+*.ngsig
+
+# Watcher output. A --output=~/... whose tilde never expanded once created a
+# literal "~" directory inside the repo holding 261MB of captured tarballs, so
+# the wrapper is ignored too rather than trusted not to reappear.
+~/
+*-captures/
+deltas/
+ttr-log.ndjson
+.last_seq
+changes-log.ndjson
+deletions.ndjson
+fp-bench-results/*.tmp

@@ -1,0 +1,42 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # Para OIDC trusted publisher
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm install -g npm@latest
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+      # A supply-chain tool that runs its own postinstall would be self-refuting.
+      - name: Verify no install scripts
+        run: |
+          node -e "
+          const pkg = JSON.parse(require('fs').readFileSync('package.json', 'utf8'))
+          const bad = ['preinstall','install','postinstall','prepare'].filter(s => pkg.scripts?.[s])
+          if (bad.length) { console.error('ERROR: install scripts found:', bad); process.exit(1) }
+          console.log('No install scripts')
+          const deps = Object.keys(pkg.dependencies || {})
+          if (deps.length) { console.error('ERROR: runtime dependencies:', deps); process.exit(1) }
+          console.log('Zero runtime dependencies')
+          "
+
+      # Publish with provenance. No NODE_AUTH_TOKEN: auth comes from OIDC.
+      - run: npm publish --provenance --access public
