@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-import { inspect } from './inspect.js'
+import { inspect, parsePackageSpec } from './inspect.js'
 import { renderInspect, renderJSON, exitCodeForVerdict } from './output.js'
 import { parseLockfile, approvePackages, renderApprove } from './approve.js'
 import { runBench } from './bench.js'
 import { DEFAULT_THRESHOLDS } from './types.js'
+import type { PackageSource } from './source.js'
 import type { WatchedPackage } from './watchlist.js'
 
 const args = process.argv.slice(2)
@@ -25,17 +26,44 @@ async function main(): Promise<void> {
     const mode = args.includes('--mode=audit') ? 'audit' : 'gate'
     const json = args.includes('--json')
 
-    // Opt-in. Measured on the only sample that can contain the class, the rule
-    // fires on packages with no evidence against them: see fabricated-profile.ts.
+    // On by default since four confirmed removals and zero false positives; see
+    // types.ts for the evidence. --block-fabricated-profile is kept because
+    // existing invocations pass it, and it now asks for what it already gets.
     const config = {
       ...DEFAULT_THRESHOLDS[mode],
-      blockFabricatedProfile: args.includes('--block-fabricated-profile'),
+      blockFabricatedProfile: !args.includes('--no-block-fabricated-profile'),
     }
 
+    // The versions worth inspecting are the ones npm has already purged, and
+    // those answer "Version not found" from the registry. bench has read from
+    // .ngpack since it existed; this is the same path for a single package.
+    const sourceArg = args.find(a => a.startsWith('--source='))?.slice('--source='.length)
+
     try {
+      let source: PackageSource | undefined
+      if (sourceArg) {
+        const { openNgpack, findNgpacks } = await import('./ngpack.js')
+        const { name, version } = parsePackageSpec(packageSpec)
+
+        const matches = findNgpacks(sourceArg, name, version)
+        source = openNgpack(sourceArg, name, version)
+
+        const chosen = matches[0]!
+        console.error(
+          `Reading ${chosen.path}\n` +
+          `  captured ${chosen.capturedAt}, versions ${chosen.versionsIncluded.join(', ') || '(none)'}` +
+          (version && !chosen.holdsVersion
+            ? `\n  NOTE: no capture holds ${version}; the packument may still carry it`
+            : '') +
+          // Not "older": the chosen one is the one holding the requested
+          // version, which is often not the most recent capture of the name.
+          (matches.length > 1 ? `\n  ${matches.length - 1} other capture(s) of the same package not used` : '')
+        )
+      }
+
       // Progress goes to stderr so `--json | jq` stays parseable.
       console.error(`Analysing ${packageSpec}...`)
-      const result = await inspect(packageSpec, { mode, config })
+      const result = await inspect(packageSpec, { mode, config, source })
 
       if (json) {
         console.log(renderJSON(result))
@@ -509,6 +537,43 @@ async function main(): Promise<void> {
       return
     }
 
+    // A prediction registered before the outcome exists. The watchlist is
+    // already this for names the rule flagged automatically; this is the same
+    // record made by hand, for a package suspected on grounds the rule does not
+    // encode — belonging to a family whose other members were removed, say.
+    //
+    // The value is entirely in the timestamp. Saying afterwards that a takedown
+    // was expected costs nothing and proves nothing; a dated entry that predates
+    // the removal is a claim that could have been wrong.
+    const addArg = args.find(a => a.startsWith('--add='))?.slice('--add='.length)
+    if (addArg) {
+      const reason = args.find(a => a.startsWith('--reason='))?.slice('--reason='.length)
+      if (!reason) {
+        console.error('Usage: norte-guard track --add=<pkg>[@<version>] --reason="why you expect this to resolve"')
+        console.error('A prediction with no stated grounds cannot be scored later.')
+        process.exit(1)
+      }
+
+      const { name, version } = parsePackageSpec(addArg)
+      const at = new Date().toISOString()
+      const added = wl.addToWatchlist(dir, [{
+        package: name,
+        version: version ?? 'observed',
+        addedAt: at,
+        reason: `prediction: ${reason}`,
+      }])
+
+      if (added === 0) {
+        console.log(`${name}@${version ?? 'observed'} was already on the watchlist; the original date stands.`)
+      } else {
+        console.log(`Registered ${name}@${version ?? 'observed'} at ${at}`)
+        console.log(`  ${reason}`)
+        console.log(`\n  It resolves on its own: npm removing it is a confirmed takedown, and`)
+        console.log(`  ${wl.VERDICT_AFTER_DAYS} days alive with >=${wl.REAL_USAGE_DOWNLOADS} weekly downloads is a confirmed false positive.`)
+      }
+      return
+    }
+
     const list = wl.loadWatchlist(dir)
     if (list.length === 0) {
       console.error('Watchlist is empty. Seed it with: norte-guard track --seed-from-log')
@@ -535,25 +600,55 @@ async function main(): Promise<void> {
     }
 
     const observations = wl.readObservations(dir)
-    const verdicts = list.map(e => wl.verdictFor(e, observations))
+    const tracked = list.map(e => wl.verdictFor(e, observations))
+
+    // Quarantine reached the same kind of verdict without waiting: captures that
+    // matched the four free conditions at publication and that npm has since
+    // removed. Same class, same authority, already settled.
+    const { loadCorpus } = await import('./corpus.js')
+    const corpus = loadCorpus([join(dir, 'captures')])
+    const fromCaptures = wl.verdictsFromCaptures(
+      corpus.samples.map(s => ({
+        package: s.package,
+        version: s.version,
+        capturedAt: s.capturedAt,
+        label: s.label,
+        labelSource: s.labelSource,
+        captureReason: s.captureReason,
+        contaminated: s.contaminated,
+      }))
+    )
+
+    // Deduplicated across the two sources. The watchlist is seeded from
+    // class.inClass in the changes log, which is the same set quarantine
+    // captures, so a package npm removed can arrive here twice — once as a
+    // tracked verdict and once as a capture — and the criterion that lets a
+    // build-failing rule default on must count removals, not records of them.
+    const trackedPackages = new Set(tracked.map(v => v.package))
+    const verdicts = [...tracked, ...fromCaptures.filter(v => !trackedPackages.has(v.package))]
 
     const mark = (s: string) => s === 'confirmed-takedown' ? '[takedown]'
                               : s === 'confirmed-false-positive' ? '[false-pos]'
                               : s === 'vanished' ? '[vanished] ' : '[pending]  '
 
     console.log('TRACKING')
-    for (const v of verdicts) {
+    for (const v of tracked) {
       console.log(`  ${mark(v.status)} ${v.package.padEnd(38)} ${v.status.padEnd(26)} ${v.detail}`)
+    }
+
+    if (fromCaptures.length > 0) {
+      console.log('\nCONFIRMED THROUGH QUARANTINE')
+      for (const v of fromCaptures) {
+        console.log(`  ${mark(v.status)} ${v.package.padEnd(38)} ${v.status.padEnd(26)} ${v.detail}`)
+      }
     }
 
     const assessment = wl.assessPromotion(verdicts)
     console.log(`\n${assessment.statement}`)
 
-    const { loadCorpus } = await import('./corpus.js')
-    const corpus = loadCorpus([join(dir, 'captures')])
     const review = wl.scheduledReview(
       corpus.samples.length,
-      corpus.confirmedMalicious.length + verdicts.filter(v => v.status === 'confirmed-takedown').length
+      corpus.confirmedMalicious.length + tracked.filter(v => v.status === 'confirmed-takedown').length
     )
     console.log(`\n${review.verdict}`)
     console.log(
@@ -660,6 +755,7 @@ COMMANDS
   corpus                    List captures, labels and composition
   scores                    Score distribution of the publish stream
   track                     Follow watched packages until they resolve
+  track --add=<pkg>         Register a prediction, dated, before it resolves
   label <dir>               Label a capture (an external source is required)
   budget                    Show, reset or consolidate collector storage
   sweep-takedowns           Ask the registry which observed packages npm removed
@@ -671,6 +767,14 @@ OPTIONS
   --json            JSON output
   --offline         bench without network: local .ngpack corpus only
   --output=<dir>    Capture directory (default: ./captures)
+
+  --source=<path>   inspect an .ngpack instead of the registry. Takes either one
+                    capture directory or the captures/ root, which is searched
+                    for the package. The only way to look at a version npm has
+                    purged, which is most of the ones worth looking at. Ages are
+                    measured from the capture time, so the verdict is the one
+                    that would have been issued then.
+
   --feed=changes    watch through the _changes cursor, not a window (default)
   --feed=rss        watch through RSS: a 50-entry window that loses publications
 
@@ -680,10 +784,17 @@ OPTIONS
       stops one build in five gets switched off.
 
   --block-fabricated-profile
-      Block the five-condition conjunction: no genome, name under 7 days old,
-      under 100KB, no repository, zero downloads. OPT-IN: of 11 packages in the
-      stream matching the profile, 7 met the full conjunction and none has been
-      removed by npm.
+      Block the conjunction: no genome, name under 7 days old, under 100KB, no
+      repository, zero downloads. ON BY DEFAULT since 2026-08-14 — this flag is
+      accepted so existing invocations keep working and now asks for what it
+      already gets. Four packages matching it were removed by npm within seven
+      hours of publication, no confirmed false positives, and 0 of 500 in
+      fp-bench's download-ranked sample can match it.
+
+  --no-block-fabricated-profile
+      Turn it back off. The rule blocks a package the developer asked for by
+      name, so refusing it is a legitimate policy; approving one package with
+      norte-guard approve <pkg> --reason= is the narrower alternative.
 
   --capture-budget=<n>
       How much disk the collector spends, not what it detects (default: 50).
@@ -699,6 +810,8 @@ OPTIONS
 EXAMPLES
   norte-guard inspect keyv@6.0.0
   norte-guard inspect keyv@6.0.0 --json | jq .verdict
+  norte-guard inspect async-critical-section@1.0.0 --block-fabricated-profile \\
+    --source=./norte-guard-captures/captures
   norte-guard approve some-package --reason="internal, we publish it"
   norte-guard bench
   norte-guard corpus

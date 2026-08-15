@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os'
 
 import { classifyGhostReversion, compareVersions } from '../src/genome.js'
 import { platformFamily, PlatformFamilyTracker } from '../src/platform-family.js'
-import { DailyCaptureBudget, rotateCaptures, directorySize, formatBytes, sweepQuarantine, QUARANTINE_REASON, consolidateDeltas } from '../src/capture-budget.js'
+import { DailyCaptureBudget, rotateCaptures, directorySize, formatBytes, sweepQuarantine, QUARANTINE_REASON, consolidateDeltas, collectOrphanObjects } from '../src/capture-budget.js'
 import { readObservations } from '../src/takedown-sweep.js'
 import { classifyFetchFailure, budgetFor } from '../src/watcher.js'
 import { describeComposition, compositionFromNotes } from '../src/corpus.js'
@@ -267,10 +267,19 @@ describe('DailyCaptureBudget', () => {
 })
 
 describe('rotateCaptures', () => {
+  // With a manifest.json, because that is what makes a directory a capture:
+  // corpus.ts will not load one without it, and rotation will not delete one
+  // without it either. The two definitions have to be the same or rotation
+  // deletes things the corpus never counted.
   function capture(root: string, name: string, opts: { bytes: number; at: string; label?: string }) {
     const dir = join(root, name)
     mkdirSync(dir, { recursive: true })
     writeFileSync(join(dir, 'blob.tgz'), Buffer.alloc(opts.bytes))
+    writeFileSync(join(dir, 'manifest.json'), JSON.stringify({
+      version: 1, package: name, capturedAt: opts.at,
+      capturedFrom: 'https://registry.npmjs.org',
+      versionsIncluded: ['1.0.0'], hashes: {},
+    }))
     writeFileSync(join(dir, 'capture-metadata.json'), JSON.stringify({
       package: name, version: '1.0.0', capturedAt: opts.at, score: 50,
       label: opts.label ?? 'unconfirmed', doNotExtract: true,
@@ -321,6 +330,104 @@ describe('rotateCaptures', () => {
     const result = rotateCaptures(root, 100, true)
     expect(result.deleted.length).toBeGreaterThan(0)
     expect(existsSync(join(root, 'a'))).toBe(true)
+  })
+
+  // The store lives inside captures/. It is a directory, it has no
+  // capture-metadata.json so it read as unconfirmed, and it has no capturedAt so
+  // it sorted first: the first rotation deleted 3,169 tarballs and 9.25GB in one
+  // rmSync, including the artifacts behind captures labelled confirmed_malicious
+  // that rotation had correctly refused to touch.
+  it('NEVER deletes the shared object store, whatever its size or age', () => {
+    const root = tempDir('ng-rot-store-')
+    const stored = putObject(root, Buffer.alloc(9000, 1))
+    capture(root, 'nueva', { bytes: 1000, at: '2026-08-10T00:00:00Z' })
+
+    const result = rotateCaptures(root, 500)
+
+    expect(existsSync(objectPath(root, stored.sha256)), 'the object store was deleted').toBe(true)
+    expect(result.deleted.map(d => d.path).join()).not.toContain('objects')
+  })
+
+  it('deleting a capture frees its tarball from the store, not just its directory', () => {
+    const root = tempDir('ng-rot-gc-')
+    const bytes = Buffer.alloc(4000, 7)
+    const stored = putObject(root, bytes)
+
+    const dir = capture(root, 'vieja', { bytes: 10, at: '2026-08-01T00:00:00Z' })
+    writeFileSync(join(dir, 'manifest.json'), JSON.stringify({
+      version: 1, package: 'vieja', capturedAt: '2026-08-01T00:00:00Z',
+      capturedFrom: 'https://registry.npmjs.org',
+      versionsIncluded: ['1.0.0'], hashes: {},
+      objectStore: root, objects: { '1.0.0': stored.sha256 },
+    }))
+
+    const result = rotateCaptures(root, 100)
+
+    expect(existsSync(join(root, 'vieja'))).toBe(false)
+    expect(existsSync(objectPath(root, stored.sha256)), 'the orphaned tarball survived').toBe(false)
+    expect(result.objectsCollected).toBe(1)
+    expect(result.objectBytesFreed).toBe(4000)
+  })
+
+  it('an object two captures share survives the first of them', () => {
+    const root = tempDir('ng-rot-shared-')
+    const stored = putObject(root, Buffer.alloc(4000, 3))
+
+    let oldestBytes = 0
+    for (const [name, at] of [['vieja', '2026-08-01T00:00:00Z'], ['nueva', '2026-08-10T00:00:00Z']] as const) {
+      const dir = capture(root, name, { bytes: 10, at })
+      writeFileSync(join(dir, 'manifest.json'), JSON.stringify({
+        version: 1, package: name, capturedAt: at,
+        capturedFrom: 'https://registry.npmjs.org',
+        versionsIncluded: ['1.0.0'], hashes: {},
+        objectStore: root, objects: { '1.0.0': stored.sha256 },
+      }))
+      if (name === 'vieja') oldestBytes = directorySize(dir)
+    }
+
+    // A cap that exactly one deletion satisfies, computed rather than guessed:
+    // the point is what happens to the shared object when the first of its two
+    // holders goes, and a hardcoded number that takes both proves nothing.
+    rotateCaptures(root, directorySize(root) - oldestBytes)
+
+    expect(existsSync(join(root, 'vieja'))).toBe(false)
+    expect(existsSync(join(root, 'nueva'))).toBe(true)
+    expect(existsSync(objectPath(root, stored.sha256)), 'a shared object went with the first holder').toBe(true)
+  })
+
+  it('reports rather than keeps deleting when only confirmed evidence is left', () => {
+    const root = tempDir('ng-rot-floor-')
+    capture(root, 'confirmada', { bytes: 8000, at: '2020-01-01T00:00:00Z', label: 'confirmed_malicious' })
+
+    const result = rotateCaptures(root, 1000)
+
+    expect(result.deleted).toHaveLength(0)
+    expect(result.stillOverCap).toBe(true)
+    expect(existsSync(join(root, 'confirmada'))).toBe(true)
+  })
+})
+
+describe('collectOrphanObjects', () => {
+  it('frees what expired quarantine left behind, and nothing a capture still names', () => {
+    const root = tempDir('ng-gc-')
+    const orphan = putObject(root, Buffer.alloc(3000, 9))
+    const held = putObject(root, Buffer.alloc(2000, 4))
+
+    const dir = join(root, 'viva@1.0.0_1')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'manifest.json'), JSON.stringify({
+      version: 1, package: 'viva', capturedAt: '2026-08-10T00:00:00Z',
+      capturedFrom: 'https://registry.npmjs.org',
+      versionsIncluded: ['1.0.0'], hashes: {},
+      objectStore: root, objects: { '1.0.0': held.sha256 },
+    }))
+
+    const result = collectOrphanObjects(root, root)
+
+    expect(result.objects).toBe(1)
+    expect(result.bytes).toBe(3000)
+    expect(existsSync(objectPath(root, orphan.sha256))).toBe(false)
+    expect(existsSync(objectPath(root, held.sha256))).toBe(true)
   })
 })
 
@@ -637,7 +744,11 @@ describe('log rotation', () => {
 
     writeFileSync(join(dir, 'changes-log.ndjson'), lines)
     utimesSync(join(dir, 'changes-log.ndjson'), new Date('2026-08-10'), new Date('2026-08-10'))
+    // Stamped with the day the rotation is being told it is, not left at the
+    // real clock. Without this the file is "today's" only while the suite runs
+    // on 2026-08-12, and the test starts failing on its own two days later.
     writeFileSync(join(dir, 'deletions.ndjson'), 'de hoy')
+    utimesSync(join(dir, 'deletions.ndjson'), new Date('2026-08-12'), new Date('2026-08-12'))
 
     const r = rotateLogs(dir, '2026-08-12')
 
@@ -726,7 +837,11 @@ describe('fabricatedProfile: a conjunction, not a score', () => {
     expect(matchesLocalConjuncts({ packument: pBig, currentMeta: mBig, regime: 'no-genome' })).toBe(false)
   })
 
-  it('it is OFF by default: the verdict stays INSUFFICIENT_HISTORY', () => {
+  // It was opt-in until 2026-08-14, when four packages matching it were removed
+  // by npm within seven hours of publication and the criterion in watchlist.ts
+  // was met. This asserts the current policy in both directions, so flipping it
+  // again stays a decision rather than a diff nobody notices.
+  it('it is ON by default: the conjunction blocks, and --no- turns it back off', () => {
     const [p, m] = candidate()
     const genome = buildGenomeFromPackument('p', p)
 
@@ -734,16 +849,46 @@ describe('fabricatedProfile: a conjunction, not a score', () => {
       packument: p, version: m.version, currentMeta: m, genome,
       weeklyDownloads: 0, config: DEFAULT_THRESHOLDS.gate,
     })
-    expect(byDefault.verdict).toBe('INSUFFICIENT_HISTORY')
-    // The signal is recorded even when it does not block, so it can be measured.
+    expect(byDefault.verdict).toBe('BLOCK')
+    expect(exitCodeForVerdict(byDefault.verdict)).toBe(1)
+    // The signal is recorded whether or not it blocks, so it can be measured.
     expect(byDefault.signals.some(s => s.type === 'fabricated_package_profile')).toBe(true)
 
-    const enabled = scoreWithRegime({
+    const disabled = scoreWithRegime({
       packument: p, version: m.version, currentMeta: m, genome,
-      weeklyDownloads: 0, config: { ...DEFAULT_THRESHOLDS.gate, blockFabricatedProfile: true },
+      weeklyDownloads: 0, config: { ...DEFAULT_THRESHOLDS.gate, blockFabricatedProfile: false },
     })
-    expect(enabled.verdict).toBe('BLOCK')
-    expect(exitCodeForVerdict(enabled.verdict)).toBe(1)
+    expect(disabled.verdict).toBe('INSUFFICIENT_HISTORY')
+    expect(disabled.signals.some(s => s.type === 'fabricated_package_profile')).toBe(true)
+  })
+
+  // Four of the five conditions are free, and they are the ones the prevalence
+  // is measured on. The fifth is real only when npm's week overlaps the
+  // package's life, and for a name created after that week closed it is
+  // arithmetic. Reported rather than silently counted as evidence.
+  it('says when zero downloads was measured over a week that predates the package', () => {
+    const [p, m] = candidate()
+
+    const vacuous = fabricatedProfile({
+      packument: p, currentMeta: m, regime: 'no-genome',
+      weeklyDownloads: 0, downloadWindowEnd: '2020-01-01',
+    })
+    expect(vacuous.matches).toBe(true)
+    expect(vacuous.downloadWindowCovers).toBe(false)
+    expect(vacuous.reason).toContain('carries no information here')
+
+    const covering = fabricatedProfile({
+      packument: p, currentMeta: m, regime: 'no-genome',
+      weeklyDownloads: 0, downloadWindowEnd: new Date().toISOString().slice(0, 10),
+    })
+    expect(covering.downloadWindowCovers).toBe(true)
+    expect(covering.reason).not.toContain('carries no information here')
+
+    // Not recorded at all is not the same as recorded and vacuous.
+    const unknown = fabricatedProfile({
+      packument: p, currentMeta: m, regime: 'no-genome', weeklyDownloads: 0,
+    })
+    expect(unknown.downloadWindowCovers).toBe(null)
   })
 
   it('the signal is worth 0: it blocks by conjunction, never by score', () => {

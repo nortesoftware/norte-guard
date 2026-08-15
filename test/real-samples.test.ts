@@ -17,7 +17,13 @@ import { describe, it, expect } from 'vitest'
 import { score } from '../src/scorer.js'
 import { buildGenome, extractCapabilities } from '../src/genome.js'
 import { detectGhostVersions, classifyGhostReversion } from '../src/genome.js'
-import { detectCampaigns } from '../src/ecosystem.js'
+import {
+  detectCampaigns,
+  detectFabricatedFamilies,
+  publishingEntity,
+  mergeCampaign,
+  type CampaignSignal,
+} from '../src/ecosystem.js'
 import {
   parseRssItems,
   selectFreshItems,
@@ -632,5 +638,220 @@ describe('watcher coverage: feed parsing and gap detection', () => {
     const { overlap, rolledOver } = computeWindowOverlap(previous, current)
     expect(overlap).toBe(1)
     expect(rolledOver).toBe(false)
+  })
+})
+
+/**
+ * The campaign this collector captured and its own detector could not see.
+ *
+ * async-critical-section@1.0.0, keyed-mutex-map@2.1.2, resource-lease-pool@1.4.2,
+ * single-flight-lock@1.0.0 and try-lock-runner@3.2.1: five first publications
+ * from one account inside four minutes, each 3-4KB with no repository, each
+ * depending on mutex-forge — published two days earlier and removed alongside
+ * them. npm published 0.0.1-security over all six, plus async-lock-queue,
+ * lock-deadline-guard and priority-mutex-lane, seven hours after the first.
+ *
+ * The fields below are the ones on disk in the captures, not invented.
+ */
+describe('fabricated families — the campaign with no history to be anomalous against', () => {
+  const PUBLISHED = '2026-08-13T09:27:00.000Z'
+  const NOW = Date.parse('2026-08-13T09:35:00.000Z')
+
+  function newPackage(overrides: {
+    name: string
+    version?: string
+    publishedBy?: string
+    minutesAfter?: number
+    unpackedSize?: number
+    dependencies?: Record<string, string>
+    repository?: unknown
+  }): Packument {
+    const publishedAt = new Date(Date.parse(PUBLISHED) + (overrides.minutesAfter ?? 0) * 60_000).toISOString()
+    const version = overrides.version ?? '1.0.0'
+
+    return {
+      name: overrides.name,
+      distTags: { latest: version },
+      versions: {
+        [version]: makeVersionMeta({
+          version,
+          publishedAt,
+          publishedBy: overrides.publishedBy ?? 'javonayers999',
+          unpackedSize: overrides.unpackedSize ?? 3_084,
+          dependencies: overrides.dependencies ?? { 'mutex-forge': '^2.0.2' },
+          repository: overrides.repository,
+          scripts: { test: 'node test.js' },
+        }),
+      },
+      time: { created: publishedAt, [version]: publishedAt },
+      maintainers: [{ name: overrides.publishedBy ?? 'javonayers999', email: 'x@example.com' }],
+      createdAt: publishedAt,
+      hasReadme: true,
+    }
+  }
+
+  const lockFamily = () => [
+    newPackage({ name: 'async-critical-section', version: '1.0.0', minutesAfter: 0 }),
+    newPackage({ name: 'keyed-mutex-map', version: '2.1.2', minutesAfter: 0.4, unpackedSize: 4_010 }),
+    newPackage({ name: 'resource-lease-pool', version: '1.4.2', minutesAfter: 2.4, unpackedSize: 3_825 }),
+    newPackage({ name: 'single-flight-lock', version: '1.0.0', minutesAfter: 3.9, unpackedSize: 3_578 }),
+    newPackage({ name: 'try-lock-runner', version: '3.2.1', minutesAfter: 4.3, unpackedSize: 3_517 }),
+  ]
+
+  it('the old detector is blind to it: nothing here has a history to be anomalous against', () => {
+    const genomeOnly = detectCampaigns(lockFamily(), 60, NOW)
+      .filter(s => s.type !== 'fabricated_family')
+
+    expect(
+      genomeOnly,
+      'a capability-delta rule fired on packages whose only version IS the delta'
+    ).toEqual([])
+  })
+
+  it('the no-genome mode catches all five, and names what tied them together', () => {
+    const signals = detectFabricatedFamilies(lockFamily(), 60, NOW)
+
+    expect(signals).toHaveLength(1)
+    const family = signals[0]!
+
+    expect(family.packages.sort()).toEqual([
+      'async-critical-section@1.0.0',
+      'keyed-mutex-map@2.1.2',
+      'resource-lease-pool@1.4.2',
+      'single-flight-lock@1.0.0',
+      'try-lock-runner@3.2.1',
+    ])
+    expect(family.entities).toHaveLength(5)
+    // The maintainer and the shared fresh dependency are what carry this case.
+    // The five names share no token at all, so a rule built on repeated
+    // substrings alone would have linked try-lock-runner to single-flight-lock
+    // and missed the other three.
+    expect(family.linkedBy).toContain('maintainer')
+    expect(family.linkedBy).toContain('dependency')
+  })
+
+  it('a shared dependency only links when it is a rare one', () => {
+    // The same shape, but the dependency everything in this class depends on:
+    // zod is in 10.83% of the captures on disk, mutex-forge in 0.13%.
+    const mcpServers = [
+      newPackage({ name: 'ascend-mcp', publishedBy: 'a', dependencies: { zod: '^3' } }),
+      newPackage({ name: 'mysql-mcp-server', publishedBy: 'b', dependencies: { zod: '^3' } }),
+      newPackage({ name: 'hugging-mcp', publishedBy: 'c', dependencies: { zod: '^3' } }),
+    ]
+
+    expect(detectFabricatedFamilies(mcpServers, 60, NOW)).toEqual([])
+  })
+
+  it('a monorepo publishing new packages in a batch is one party, not seven', () => {
+    // fwork-jsts-*: one account, no repository field, six names sharing "fwork"
+    // — a token in 6 of 41,356 observed names. Counted as six they cleared every
+    // threshold; collapsed by prefix they are one.
+    const monorepo = ['common', 'db', 'server', 'browser', 'test', 'react-mui-ext'].map((part, i) =>
+      newPackage({
+        name: `fwork-${part}`,
+        publishedBy: 'joabssilveira',
+        minutesAfter: i,
+        dependencies: { 'fwork-jsts-common': '^2.0.0' },
+      })
+    )
+
+    const signals = detectFabricatedFamilies(monorepo, 60, NOW)
+    expect(signals, 'a monorepo batch was reported as a campaign').toEqual([])
+
+    const peers = monorepo.map(m => ({ name: m.name, maintainer: 'joabssilveira' }))
+    expect(new Set(monorepo.map(p =>
+      publishingEntity(p.name, Object.values(p.versions)[0], 'joabssilveira', peers)
+    ))).toEqual(new Set(['prefix:fwork']))
+  })
+
+  it('a scope is a declared identity and collapses too', () => {
+    const scoped = ['a', 'b', 'c', 'd'].map((part, i) =>
+      newPackage({ name: `@acme/${part}`, publishedBy: 'acme-bot', minutesAfter: i })
+    )
+    expect(detectFabricatedFamilies(scoped, 60, NOW)).toEqual([])
+  })
+
+  it('a shared repository collapses packages published from different accounts', () => {
+    const shared = ['one', 'two', 'three'].map((part, i) =>
+      newPackage({
+        name: `thing-${part}`,
+        publishedBy: `dev-${i}`,
+        minutesAfter: i,
+        repository: { url: 'git+https://github.com/acme/monorepo.git' },
+      })
+    )
+    // A repository field also takes them out of the class entirely, which is the
+    // first thing that should stop this: the conjunction requires its absence.
+    expect(detectFabricatedFamilies(shared, 60, NOW)).toEqual([])
+    expect(new Set(shared.map(p =>
+      publishingEntity(p.name, Object.values(p.versions)[0])
+    ))).toEqual(new Set(['repo:acme/monorepo']))
+  })
+
+  it('a package outside the window is not part of the family', () => {
+    const family = lockFamily()
+    const late = detectFabricatedFamilies(family, 60, Date.parse('2026-08-14T09:35:00.000Z'))
+    expect(late, 'a day later the whole window has expired').toEqual([])
+  })
+})
+
+/**
+ * The same campaign was written to campaigns.ndjson 19 times, and 163 lines on
+ * disk describe 27 campaigns. Detection has no memory and should not: the ledger
+ * is what turns a repeated detection into one record.
+ */
+describe('campaign ledger', () => {
+  const signal = (packages: string[]): CampaignSignal => ({
+    type: 'fabricated_family',
+    certainty: 80,
+    packages,
+    entities: packages.map(p => `package:${p.split('@')[0]}`),
+    windowMinutes: 5,
+    description: 'x',
+    linkedBy: ['maintainer'],
+  })
+
+  it('announces once, then updates in silence', () => {
+    const first = mergeCampaign([], signal(['a@1', 'b@1', 'c@1']), '2026-08-13T09:35:00Z')
+    expect(first.change).toBe('new')
+    expect(first.records).toHaveLength(1)
+
+    let records = first.records
+    for (let i = 0; i < 18; i++) {
+      const again = mergeCampaign(records, signal(['a@1', 'b@1', 'c@1']), '2026-08-13T09:40:00Z')
+      expect(again.change, 'the same campaign was announced twice').toBe(null)
+      expect(again.records).toHaveLength(1)
+      records = again.records
+    }
+
+    expect(records[0]!.sightings).toBe(19)
+    expect(records[0]!.firstSeenAt).toBe('2026-08-13T09:35:00Z')
+    expect(records[0]!.lastSeenAt).toBe('2026-08-13T09:40:00Z')
+  })
+
+  it('a campaign that grows is reported again, with only what is new', () => {
+    const first = mergeCampaign([], signal(['a@1', 'b@1', 'c@1']), '2026-08-13T09:35:00Z')
+    const grown = mergeCampaign(first.records, signal(['b@1', 'c@1', 'd@1']), '2026-08-13T09:45:00Z')
+
+    expect(grown.change).toBe('grown')
+    expect(grown.added).toEqual(['d@1'])
+    // Union, not replacement: a@1 aged out of the window and was still part of it.
+    expect(grown.record.packages).toEqual(['a@1', 'b@1', 'c@1', 'd@1'])
+    expect(grown.records).toHaveLength(1)
+  })
+
+  it('two campaigns sharing no member stay two records', () => {
+    const first = mergeCampaign([], signal(['a@1', 'b@1', 'c@1']), '2026-08-13T09:35:00Z')
+    const other = mergeCampaign(first.records, signal(['x@1', 'y@1', 'z@1']), '2026-08-13T09:36:00Z')
+
+    expect(other.change).toBe('new')
+    expect(other.records).toHaveLength(2)
+    expect(other.record.id).not.toBe(first.record.id)
+  })
+
+  it('the id survives a restart: same first detection, same record', () => {
+    const a = mergeCampaign([], signal(['c@1', 'a@1', 'b@1']), '2026-08-13T09:35:00Z')
+    const b = mergeCampaign([], signal(['b@1', 'c@1', 'a@1']), '2026-08-13T11:00:00Z')
+    expect(a.record.id).toBe(b.record.id)
   })
 })

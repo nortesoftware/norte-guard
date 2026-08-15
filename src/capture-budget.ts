@@ -9,7 +9,8 @@
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { gzipSync, gunzipSync } from 'node:zlib'
-import type { CaptureLabel } from './ngpack.js'
+import type { CaptureLabel, NgpackManifest } from './ngpack.js'
+import { deleteObject, listObjects, objectSize, OBJECTS_DIR } from './object-store.js'
 
 export const DEFAULT_DAILY_BYTES = 2 * 1024 ** 3
 export const DEFAULT_TOTAL_BYTES = 10 * 1024 ** 3
@@ -234,6 +235,47 @@ export interface QuarantineSweep {
   expired: string[]
   kept: number
   promoted: number
+  objectsCollected: number
+  objectBytesFreed: number
+}
+
+export interface ObjectCollection {
+  objects: number
+  bytes: number
+}
+
+// Mark and sweep over the shared store: an object survives if a capture still
+// on disk names it, and goes otherwise. This is the only thing that frees the
+// bytes behind an expired capture, since deleting the directory leaves the
+// tarball under its hash where every other capture can still reach it.
+//
+// It is also the repair for anything already leaked, because it asks what the
+// store holds rather than what this run deleted.
+export function collectOrphanObjects(
+  capturesDir: string,
+  // Defaults to the captures directory and belongs there, for the same reason
+  // rotation no longer follows manifest.objectStore: a store reached by any
+  // path other than the one being swept belongs to somebody else.
+  storeRoot = capturesDir,
+  dryRun = false
+): ObjectCollection {
+  const collection: ObjectCollection = { objects: 0, bytes: 0 }
+  if (!existsSync(capturesDir)) return collection
+
+  const referenced = new Set<string>()
+  for (const name of readdirSync(capturesDir)) {
+    const manifest = readManifest(join(capturesDir, name))
+    if (!manifest) continue
+    for (const hash of Object.values(manifest.objects ?? {})) referenced.add(hash)
+  }
+
+  for (const hash of listObjects(storeRoot)) {
+    if (referenced.has(hash)) continue
+    collection.objects++
+    collection.bytes += dryRun ? objectSize(storeRoot, hash) : deleteObject(storeRoot, hash)
+  }
+
+  return collection
 }
 
 // Deletes quarantine captures past their retention that nothing confirmed.
@@ -244,7 +286,9 @@ export function sweepQuarantine(
   now = Date.now(),
   dryRun = false
 ): QuarantineSweep {
-  const result: QuarantineSweep = { expired: [], kept: 0, promoted: 0 }
+  const result: QuarantineSweep = {
+    expired: [], kept: 0, promoted: 0, objectsCollected: 0, objectBytesFreed: 0,
+  }
   if (!existsSync(capturesDir)) return result
 
   for (const name of readdirSync(capturesDir)) {
@@ -275,6 +319,12 @@ export function sweepQuarantine(
     result.expired.push(path)
   }
 
+  // After the directories, never before: an object is only orphaned once the
+  // last capture naming it is gone.
+  const collected = collectOrphanObjects(capturesDir, capturesDir, dryRun)
+  result.objectsCollected = collected.objects
+  result.objectBytesFreed = collected.bytes
+
   return result
 }
 
@@ -292,21 +342,45 @@ export interface RotationResult {
   after: number
   deleted: RotationCandidate[]
   protectedCount: number
+  // Objects collected because the last capture referencing them was deleted, and
+  // the bytes that actually left the disk. Reported separately from the capture
+  // directories because that is where nearly all of the size is.
+  objectsCollected: number
+  objectBytesFreed: number
+  // True when every deletable capture is gone and the total is still over the
+  // cap: what remains is confirmed evidence, which rotation will not touch. A
+  // condition to act on, not one to keep deleting through.
+  stillOverCap: boolean
 }
 
 // Deletes oldest first, and only captures still labelled 'unconfirmed'. Anything
 // someone has confirmed or cleared is evidence, and rotation must never be the
 // reason it disappears.
+//
+// A capture is a directory holding a manifest.json, and that check is not
+// cosmetic. The shared object store lives at captures/objects/ — it is a
+// directory, it has no capture-metadata.json so it read as 'unconfirmed', it has
+// no capturedAt so it sorted first, and it holds nearly every byte under
+// captures/. The first rotation therefore deleted the entire object store in one
+// rmSync: 3,169 tarballs, 9.25GB, including the artifacts behind captures that
+// were labelled confirmed_malicious and that rotation had correctly refused to
+// touch. The guarantee was real and the bytes left through the shared store.
 export function rotateCaptures(
   capturesDir: string,
   maxBytes: number,
   dryRun = false
 ): RotationResult {
-  if (!existsSync(capturesDir)) {
-    return { before: 0, after: 0, deleted: [], protectedCount: 0 }
+  const empty: RotationResult = {
+    before: 0, after: 0, deleted: [], protectedCount: 0,
+    objectsCollected: 0, objectBytesFreed: 0, stillOverCap: false,
   }
+  if (!existsSync(capturesDir)) return empty
 
   const candidates: RotationCandidate[] = []
+  // Every capture's objects, and how many captures reference each one. A tarball
+  // shared by a platform family is freed by the last of them, not the first.
+  const objectsOf = new Map<string, string[]>()
+  const references = new Map<string, number>()
   let protectedCount = 0
   let total = 0
 
@@ -318,6 +392,19 @@ export function rotateCaptures(
 
     const bytes = directorySize(path)
     total += bytes
+
+    // Counted towards the total — the store is exactly what the cap exists to
+    // bound — and never a candidate for deletion. It is collected below, object
+    // by object, through the captures that reference them.
+    const manifest = readManifest(path)
+    if (!manifest) continue
+
+    // Deduplicated per capture: a manifest that names the same bytes for two
+    // versions holds one object, and counting it twice would leave it referenced
+    // by a capture that no longer exists.
+    const hashes = [...new Set(Object.values(manifest.objects ?? {}))]
+    objectsOf.set(path, hashes)
+    for (const hash of hashes) references.set(hash, (references.get(hash) ?? 0) + 1)
 
     let label: CaptureLabel = 'unconfirmed'
     let capturedAt = ''
@@ -336,20 +423,70 @@ export function rotateCaptures(
 
   const before = total
   if (total <= maxBytes) {
-    return { before, after: total, deleted: [], protectedCount }
+    return { ...empty, before, after: total, protectedCount }
   }
 
   candidates.sort((a, b) => a.capturedAt.localeCompare(b.capturedAt))
 
+  // The store under the directory being rotated, and nowhere else. The manifest
+  // records objectStore as the path the watcher was given — "captures/captures",
+  // "norte-guard-captures/captures" — relative to wherever it happened to be
+  // running, so resolving it points rotation at whatever corpus sits under the
+  // current shell's cwd. That is the same failure this change exists to stop,
+  // reached by a different route.
+  const store = capturesDir
+
   const deleted: RotationCandidate[] = []
+  let objectsCollected = 0
+  let objectBytesFreed = 0
+
   for (const candidate of candidates) {
     if (total <= maxBytes) break
+
+    const hashes = objectsOf.get(candidate.path) ?? []
+    // Which of this capture's objects nothing else holds. Decided before the
+    // deletion, so the accounting below is the bytes that will actually go.
+    const orphaned = hashes.filter(h => (references.get(h) ?? 0) <= 1)
+
+    // The directory being deleted goes first, and only then the objects it was
+    // the last holder of. A failed rmSync must not leave a capture pointing at
+    // bytes that are already gone.
     if (!dryRun) {
       try { rmSync(candidate.path, { recursive: true, force: true }) } catch { continue }
     }
-    total -= candidate.bytes
+
+    let freed = 0
+    for (const hash of orphaned) {
+      freed += dryRun ? objectSize(store, hash) : deleteObject(store, hash)
+    }
+
+    for (const hash of hashes) references.set(hash, (references.get(hash) ?? 1) - 1)
+    objectsCollected += orphaned.length
+    objectBytesFreed += freed
+    // Both were counted: `total` is the sum of the directories under
+    // capturesDir, and the store is one of them.
+    total -= candidate.bytes + freed
     deleted.push(candidate)
   }
 
-  return { before, after: total, deleted, protectedCount }
+  return {
+    before,
+    after: total,
+    deleted,
+    protectedCount,
+    objectsCollected,
+    objectBytesFreed,
+    stillOverCap: total > maxBytes,
+  }
 }
+
+function readManifest(dir: string): NgpackManifest | null {
+  const path = join(dir, 'manifest.json')
+  if (!existsSync(path)) return null
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8')) as NgpackManifest
+  } catch {
+    return null
+  }
+}
+

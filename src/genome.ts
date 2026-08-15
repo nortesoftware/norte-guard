@@ -37,10 +37,14 @@ export function extractCapabilities(v: VersionMeta): Set<Capability> {
   return caps
 }
 
-function publishVelocity(versions: VersionMeta[], windowHours = 24): number {
+// `now` rather than the wall clock, so a genome built from a snapshot describes
+// the package as it stood when the snapshot was taken. Left at Date.now() the
+// baseline of any archived packument decays to zero, the floor below takes over,
+// and the velocity ratio a stored verdict rests on rises every year the file
+// sits on disk.
+function publishVelocity(versions: VersionMeta[], windowHours = 24, now = Date.now()): number {
   if (versions.length < 2) return 0
 
-  const now = Date.now()
   const windowMs = windowHours * 3_600_000
   const recent = versions.filter(v => now - new Date(v.publishedAt).getTime() < windowMs)
 
@@ -94,7 +98,8 @@ export async function buildGenome(
 // for data already in memory.
 export function buildGenomeFromPackument(
   packageName: string,
-  packument: Packument
+  packument: Packument,
+  now = Date.now()
 ): PackageGenome {
   const sorted = sortedVersions(packument)
 
@@ -131,7 +136,7 @@ export function buildGenomeFromPackument(
 
   // Measured over the last month excluding the newest five versions, so a burst
   // that is itself the attack cannot raise its own baseline.
-  const historicalVelocity = publishVelocity(sorted.slice(0, -5), 24 * 30)
+  const historicalVelocity = publishVelocity(sorted.slice(0, -5), 24 * 30, now)
 
   const { isMonorepo } = detectMonorepoPattern(packument)
 

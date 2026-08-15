@@ -61,9 +61,10 @@ const UNWIRED = new Set<string>([
   'takedown.ts:packumentAsOf',
 
   // Utilities built alongside their subsystems and not needed by it yet.
+  // objectSize left this list when rotation started accounting for the bytes it
+  // frees from the store rather than only for the directories it deletes.
   'log-rotation.ts:logFootprint',
   'object-store.ts:hasObject',
-  'object-store.ts:objectSize',
 
   // Compares what npm says about the past against what the watcher recorded.
   // No caller: it needs a command that does not exist.

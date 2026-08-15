@@ -32,6 +32,7 @@ import {
   PRE_FIX_REASON,
 } from '../src/corpus.js'
 import { runBench, buildRecallReport, buildFalsePositiveReport } from '../src/bench.js'
+import { computeFieldRecall } from '../src/field-recall.js'
 import { summarize, sampleEvenly, stratifyByDecile, buildArtifact, blockZeroAlert, BLOCK_ZERO_ALERT, type FpBenchRow } from '../src/fp-bench.js'
 import { saveArtifact, loadLatestArtifact, artifactPath, engineVersion } from '../src/fp-bench-store.js'
 import { scoreWithRegime, score } from '../src/scorer.js'
@@ -706,6 +707,11 @@ describe('runBench offline over the .ngpack corpus', () => {
         corpusRoots: [root],
         offline: true,
         fpResultsDir: join(root, 'sin-resultados'),
+        // Pointed at the temp corpus, not left to default. Otherwise field
+        // recall reads the developer's real capture directory — a 22MB log
+        // whose contents decide how long this test takes and, in principle,
+        // what it asserts.
+        captureDir: root,
       })
     } finally {
       console.log = log
@@ -755,6 +761,7 @@ describe('runBench offline over the .ngpack corpus', () => {
       summary = await runBench({
         mode: 'gate', corpusRoots: [root], offline: true,
         fpResultsDir: join(root, 'sin-resultados'),
+        captureDir: root,
       })
     } finally {
       console.log = log
@@ -785,3 +792,189 @@ describe('runBench offline over the .ngpack corpus', () => {
     expect(result.baselineVersion).toBe('5.32.0')
   })
 })
+
+/**
+ * Coverage read 4/73 — 5.48% — for two days after four of its own confirmed
+ * samples had stopped being in either half of the fraction. Both numbers came
+ * from takedowns.json, written by one sweep on 2026-08-12 at 20:43Z; the four
+ * packages were captured at 09:27 the next morning, and npm removed them that
+ * afternoon. A sweep is a snapshot of an answer, and nothing said when.
+ */
+describe('takedown coverage counts the evidence that arrived after the sweep', () => {
+  function fixture(): string {
+    const dir = makeTempDir('ng-coverage-')
+
+    writeFileSync(join(dir, 'takedowns.json'), JSON.stringify({
+      sweptAt: '2026-08-12T20:43:58.957Z',
+      takenDown: [
+        { package: 'vieja-a', observedVersion: '0.0.1-security', observedAt: '2026-08-12T10:00:00Z' },
+        { package: 'vieja-b', observedVersion: '1.0.0', observedAt: '2026-08-12T10:00:00Z' },
+      ],
+      preTakedownObservations: [
+        { package: 'vieja-b', observedVersion: '1.0.0', observedAt: '2026-08-12T10:00:00Z' },
+      ],
+    }))
+
+    // The watcher's own log, written as it saw the removals happen — the day
+    // after the sweep ran.
+    writeFileSync(join(dir, 'takedown-log.ndjson'),
+      [
+        { package: 'async-critical-section', seenAt: '2026-08-13T16:19:03Z', purgedVersions: ['1.0.0'] },
+        { package: 'mutex-forge', seenAt: '2026-08-13T16:19:27Z', purgedVersions: ['2.0.2'] },
+      ].map(r => JSON.stringify(r)).join('\n') + '\n')
+
+    return dir
+  }
+
+  const capture = (pkg: string, version: string): CorpusSample => ({
+    package: pkg,
+    version,
+    label: 'confirmed_malicious',
+    ngpackPath: `/captures/${pkg}`,
+    capturedAt: '2026-08-13T09:27:00Z',
+    labelSource: `npm-takedown: 0.0.1-security published over ${pkg}`,
+    hasTarball: true,
+    labelAssumed: false,
+    contaminated: false,
+  })
+
+  it('the live log and the labelled captures are in the denominator too', () => {
+    const dir = fixture()
+
+    const stale = computeFieldRecall(dir, [])
+    // Sweep alone: 2 removals, 1 observed beforehand.
+    expect(stale.takedownsFound).toBe(4)   // + the two the watcher logged since
+    expect(stale.evidence.sweepTakedowns).toBe(2)
+    expect(stale.evidence.liveLogTakedowns).toBe(2)
+
+    const withCaptures = computeFieldRecall(dir, [capture('async-critical-section', '1.0.0')])
+    expect(withCaptures.takedownsFound).toBe(4)
+    // The capture is an observation of the artifact before the removal, by
+    // construction: the bytes are on disk.
+    expect(withCaptures.preTakedownObservations).toBe(2)
+    expect(withCaptures.evidence.labelledCaptures).toBe(1)
+  })
+
+  it('a capture of a package the sweep never saw adds to both halves', () => {
+    const dir = fixture()
+    const before = computeFieldRecall(dir, [])
+    const after = computeFieldRecall(dir, [capture('single-flight-lock', '1.0.0')])
+
+    expect(after.takedownsFound).toBe(before.takedownsFound + 1)
+    expect(after.preTakedownObservations).toBe(before.preTakedownObservations + 1)
+  })
+
+  it('it says how stale the sweep is instead of presenting it as current', () => {
+    const report = computeFieldRecall(fixture(), [])
+
+    expect(report.evidence.sweptAt).toBe('2026-08-12T20:43:58.957Z')
+    expect(report.evidence.takedownsAfterSweep).toBe(2)
+    expect(report.evidence.staleness).toContain('2026-08-12T20:43:58.957Z')
+    expect(report.evidence.staleness).toContain('sweep-takedowns --include-observed')
+  })
+
+  it('a capture holding only npm\'s marker is not an observation of anything', () => {
+    const dir = fixture()
+    const marker: CorpusSample = { ...capture('holder-only', '0.0.1-security') }
+
+    const report = computeFieldRecall(dir, [marker])
+    expect(report.evidence.labelledCaptures).toBe(0)
+    expect(report.preTakedownObservations).toBe(computeFieldRecall(dir, []).preTakedownObservations)
+  })
+
+  it('with no sweep at all it still counts what the watcher saw', () => {
+    const dir = makeTempDir('ng-coverage-nosweep-')
+    writeFileSync(join(dir, 'takedown-log.ndjson'),
+      JSON.stringify({ package: 'algo', seenAt: '2026-08-13T16:19:03Z', purgedVersions: ['1.0.0'] }) + '\n')
+
+    const report = computeFieldRecall(dir, [])
+    expect(report.takedownsFound).toBe(1)
+    expect(report.evidence.sweptAt).toBe(null)
+  })
+})
+
+/**
+ * A snapshot answers with what it recorded, or it does not answer.
+ *
+ * The download count is the one input the conjunction needs that an .ngpack
+ * cannot reconstruct: npm reports one complete week and that week has moved on.
+ * Reading today's count into a verdict about an archived version is bad enough
+ * on its own; the packages a snapshot is most often asked about are the ones npm
+ * removed, and for those the downloads endpoint answers 404, which the client
+ * maps to zero. The fifth condition would hold BECAUSE the package was taken
+ * down, and a benchmark whose labels are takedowns would be scoring its own
+ * labels.
+ */
+describe('an .ngpack verdict never reaches for a number it did not capture', () => {
+  it('a snapshot with no recorded count reports the rule as unverified, not as cleared', async () => {
+    const root = makeTempDir('ng-nodl-')
+    const dir = writeCapture(root, {
+      pkg: 'fabricado', version: '1.0.0',
+      packument: makeFabricatedPackument(),
+      metadata: { label: 'unconfirmed' },
+    })
+
+    const result = await inspect('fabricado@1.0.0', {
+      mode: 'gate',
+      source: new NgpackSource(dir),
+      config: { ...DEFAULT_THRESHOLDS.gate, blockFabricatedProfile: true },
+    })
+
+    expect(result.verdict).toBe('INSUFFICIENT_HISTORY')
+    expect(result.signals.map(s => s.type)).toContain('fabricated_profile_unverified')
+    expect(result.signals.map(s => s.type)).not.toContain('fabricated_package_profile')
+  })
+
+  it('a snapshot that recorded the count uses it, and blocks on it', async () => {
+    const root = makeTempDir('ng-dl-')
+    const dir = writeCapture(root, {
+      pkg: 'fabricado', version: '1.0.0',
+      packument: makeFabricatedPackument(),
+      metadata: {
+        label: 'unconfirmed',
+        weeklyDownloads: 0,
+        downloadWindowEnd: '2026-08-13',
+      },
+    })
+
+    const result = await inspect('fabricado@1.0.0', {
+      mode: 'gate',
+      source: new NgpackSource(dir),
+      config: { ...DEFAULT_THRESHOLDS.gate, blockFabricatedProfile: true },
+    })
+
+    expect(result.verdict).toBe('BLOCK')
+    expect(result.signals.map(s => s.type)).toContain('fabricated_package_profile')
+    // And the verdict is dated to the capture, not to this run.
+    expect(result.evaluatedAsOf).toBe(result.source.capturedAt)
+  })
+})
+
+// The observed class: no history, name minutes old, under 100KB, no repository.
+// Published a moment before writeCapture's capturedAt, because the ages are
+// measured as of the capture and a version published after it is not young, it
+// is impossible.
+function makeFabricatedPackument(): Packument {
+  const publishedAt = '2026-08-12T02:40:00.000Z'
+  return {
+    name: 'fabricado',
+    distTags: { latest: '1.0.0' },
+    versions: {
+      '1.0.0': {
+        version: '1.0.0',
+        publishedAt,
+        publishedBy: 'alguien',
+        unpackedSize: 3_084,
+        hasInstallScript: false,
+        scripts: {},
+        dependencies: {},
+        devDependencies: {},
+        dist: { tarball: '', integrity: '' },
+      },
+    },
+    time: { created: publishedAt, '1.0.0': publishedAt },
+    maintainers: [{ name: 'alguien', email: 'a@example.com' }],
+    createdAt: publishedAt,
+    hasReadme: true,
+  }
+}

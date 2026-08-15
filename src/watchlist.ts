@@ -204,6 +204,65 @@ export function scheduledReview(
   }
 }
 
+// The other half of the evidence, and the half that arrived first.
+//
+// The watchlist follows names the rule flagged and waits thirty days for the
+// registry to settle them. Quarantine takes a different route to the same fact:
+// it keeps every publication matching the four free conditions — which is what
+// captureReason 'quarantine-no-genome' records — and when npm later publishes
+// 0.0.1-security over one, the sweep labels the capture confirmed_malicious with
+// npm's own removal as the source.
+//
+// Those are confirmed removals of exactly the class this rule blocks, established
+// the same way and by the same authority as the watchlist's. Leaving them out of
+// the criterion would mean waiting thirty days for evidence already on disk.
+export interface ClassCapture {
+  package: string
+  version: string
+  capturedAt: string
+  label: string
+  labelSource?: string
+  captureReason?: string
+  contaminated: boolean
+}
+
+export const QUARANTINE_CAPTURE_REASON = 'quarantine-no-genome'
+
+export function verdictsFromCaptures(
+  captures: ClassCapture[],
+  now = Date.now()
+): TrackedVerdict[] {
+  // One verdict per PACKAGE, not per capture directory. The same package is
+  // captured again on every publication, and counting three snapshots of one
+  // removal as three removals would clear the promotion criterion on one event.
+  const seen = new Set<string>()
+
+  return captures
+    .filter(c =>
+      !c.contaminated &&
+      c.captureReason === QUARANTINE_CAPTURE_REASON &&
+      c.label === 'confirmed_malicious' &&
+      // npm's removal, not ours. A capture labelled from anything else is
+      // evidence of something, but not of this.
+      Boolean(c.labelSource?.includes('npm-takedown'))
+    )
+    .filter(c => {
+      if (seen.has(c.package)) return false
+      seen.add(c.package)
+      return true
+    })
+    .map(c => ({
+      package: c.package,
+      addedAt: c.capturedAt,
+      daysTracked: Math.round(((now - new Date(c.capturedAt).getTime()) / 86_400_000) * 10) / 10,
+      status: 'confirmed-takedown' as const,
+      lastDownloads: null,
+      detail:
+        `quarantined at publication with the four free conditions holding, ` +
+        `${c.version} removed by npm`,
+    }))
+}
+
 export interface PromotionAssessment {
   confirmedTakedowns: number
   confirmedFalsePositives: number

@@ -14,7 +14,7 @@
 // against dist.integrity.
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, statSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
 export const OBJECTS_DIR = 'objects'
@@ -119,4 +119,40 @@ export function storeStats(root: string): StoreStats {
 
 export function objectSize(root: string, hash: string): number {
   try { return statSync(objectPath(root, hash)).size } catch { return 0 }
+}
+
+// Every hash the store holds, read from the two-character shards rather than
+// from index.ndjson: the index is append-only and records what was written, not
+// what is still there.
+export function listObjects(root: string): string[] {
+  const base = join(root, OBJECTS_DIR)
+  if (!existsSync(base)) return []
+
+  const hashes: string[] = []
+  for (const shard of readdirSync(base)) {
+    try {
+      if (!statSync(join(base, shard)).isDirectory()) continue
+      for (const name of readdirSync(join(base, shard))) hashes.push(name)
+    } catch { /* an unreadable shard is not a reason to abandon the sweep */ }
+  }
+  return hashes
+}
+
+// Deleting a capture does not delete its bytes: the tarball is in the store,
+// under a name shared with every other capture that holds identical bytes. So
+// the store is collected rather than rotated — an object goes when the last
+// capture referencing it goes, and never because a directory listing made it
+// look like a capture.
+//
+// Returns the bytes freed, so a caller counting against a disk cap can subtract
+// what actually left the disk instead of what it hoped would.
+export function deleteObject(root: string, hash: string): number {
+  const path = objectPath(root, hash)
+  try {
+    const bytes = statSync(path).size
+    rmSync(path, { force: true })
+    return bytes
+  } catch {
+    return 0
+  }
 }

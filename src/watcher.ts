@@ -20,10 +20,11 @@ import {
 } from './packument.js'
 import { buildGenomeFromPackument, detectGhostVersions, classifyGhostReversion } from './genome.js'
 import { sortedVersions } from './packument.js'
-import { detectCampaigns } from './ecosystem.js'
+import { detectCampaigns, mergeCampaign, type CampaignRecord } from './ecosystem.js'
 import { scoreWithRegime } from './scorer.js'
 import { createNgpack, writeCaptureMetadata, labelCapture, type CaptureComposition } from './ngpack.js'
 import { NPM_SECURITY_HOLDER } from './takedown.js'
+import { fetchWeeklyDownloadsWindow } from './downloads.js'
 import { classifyPublication, compactMarkers, YOUNG_NAME_DAYS, TINY_PACKAGE_BYTES, type ClassMarkers } from './observed-class.js'
 import { rotateLogs } from './log-rotation.js'
 import { storeStats } from './object-store.js'
@@ -581,12 +582,25 @@ async function analyzePackage(
           platformFamily: family.family?.base ?? null,
         }
 
+        // npm reports one week at a time and the count for the week a package
+        // was published in stops being answerable a week later. The
+        // fabricated-profile conjunction needs exactly that number, so a capture
+        // that does not carry it is a snapshot that cannot reproduce its own
+        // verdict — which is the whole point of taking one.
+        //
+        // Asked only for captures of the observed class, which is the only
+        // shape the conjunction can apply to: 2.65% of the stream, the same
+        // budget the rule already assumes.
+        const counted = markers.inClass ? await fetchWeeklyDownloadsWindow(name) : null
+
         writeCaptureMetadata(dir, {
           package: name,
           version: latestVersion,
           capturedAt: new Date().toISOString(),
           score: effectiveScore,
           label: 'unconfirmed',
+          weeklyDownloads: counted ? counted.downloads : (markers.inClass ? null : undefined),
+          downloadWindowEnd: counted?.end ?? undefined,
           // Which engine selected a sample is part of the sample: a corpus
           // collected by a detector with a known bug is a draw from what that
           // bug flagged, and a benchmark cannot correct for what it cannot see.
@@ -993,28 +1007,77 @@ function rememberForCampaigns(packument: Packument, now = Date.now()): void {
 // which is the only signal here that catches a day-zero campaign with no prior
 // corpus. Recorded so the gate can read it — a campaign is a block reason on its
 // own, whatever the per-package rules say.
+// One record per campaign, held across passes so a campaign still sitting in the
+// window is updated rather than announced again. Loaded from disk at startup so
+// a restart does not re-announce everything currently open.
+const CAMPAIGN_LEDGER_FILE = 'campaigns.json'
+let campaignLedger: CampaignRecord[] | null = null
+
+function loadCampaignLedger(dir: string): CampaignRecord[] {
+  if (campaignLedger) return campaignLedger
+  try {
+    const parsed = JSON.parse(readFileSync(join(dir, CAMPAIGN_LEDGER_FILE), 'utf-8'))
+    // Shape-checked, not trusted: a truncated write would otherwise become a
+    // non-array that every merge below throws on, taking the feed with it.
+    campaignLedger = Array.isArray(parsed) ? parsed as CampaignRecord[] : []
+  } catch {
+    campaignLedger = []
+  }
+  return campaignLedger
+}
+
 function checkCampaigns(config: WatcherConfig): void {
   if (campaignWindow.size < 3) return
 
   const signals = detectCampaigns([...campaignWindow.values()], 60)
   if (signals.length === 0) return
 
+  const at = new Date().toISOString()
+  let records = loadCampaignLedger(config.outputDir)
+  let changed = false
+
   for (const signal of signals) {
+    const update = mergeCampaign(records, signal, at)
+    records = update.records
+
+    // The record is always current; the alert is only for what changed. This is
+    // what turns 163 lines into one per campaign plus one per growth.
+    if (update.change === null) continue
+
+    changed = true
     coverage.campaigns++
+
+    const record = update.record
     console.log(
-      `CAMPAIGN: ${signal.type} - ${signal.packages.length} packages - ` +
-      `certainty ${signal.certainty}%`
+      update.change === 'new'
+        ? `CAMPAIGN: ${record.type} - ${record.packages.length} packages, ` +
+          `${record.entities.length} distinct parties - certainty ${record.certainty}%` +
+          (record.linkedBy?.length ? ` - linked by ${record.linkedBy.join('+')}` : '')
+        : `CAMPAIGN GREW: ${record.id} - ${update.added.length} new ` +
+          `(${record.packages.length} total, ${record.entities.length} parties)`
     )
-    console.log(`   ${signal.packages.slice(0, 8).join(', ')}${signal.packages.length > 8 ? '...' : ''}`)
+    console.log(
+      `   ${update.added.slice(0, 8).join(', ')}${update.added.length > 8 ? '...' : ''}`
+    )
 
     try {
       writeFileSync(
         join(config.outputDir, 'campaigns.ndjson'),
-        JSON.stringify({ ...signal, detectedAt: new Date().toISOString() }) + '\n',
+        JSON.stringify({ ...record, change: update.change, added: update.added, detectedAt: at }) + '\n',
         { flag: 'a' }
       )
     } catch { /* the console line is the fallback record */ }
   }
+
+  campaignLedger = records
+  // Written on every pass, not only on a change: sightings and lastSeenAt move
+  // whether or not anything is announced, and that is the record of a campaign
+  // still being open.
+  try {
+    writeFileSync(join(config.outputDir, CAMPAIGN_LEDGER_FILE), JSON.stringify(records, null, 2))
+  } catch { /* the ndjson trail above survives it */ }
+
+  if (!changed) return
 }
 
 // A change whose dist-tag latest has not moved is an edit to something else:

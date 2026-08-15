@@ -62,6 +62,13 @@ export interface RecallReport {
   truePositives: number
   falseNegatives: number
   unreadable: number
+  // Samples whose verdict turned on a fact that could not be established —
+  // offline, the fabricated-profile conjunction cannot read a download count,
+  // and the rule then declines to apply. Held apart from the misses, because a
+  // rule that did not run is not a rule that was wrong, and folding the two
+  // together is how an offline run came to print 0% for six samples the gate
+  // blocks online.
+  unevaluated: number
   // Errors counted as misses, printed whenever it differs, so an unreadable
   // snapshot cannot quietly raise recall.
   conservativeValue: number | null
@@ -221,7 +228,9 @@ export async function runBench(options: BenchOptions = {}): Promise<BenchSummary
       missing: references.filter(r => r.sample === null),
     },
     bySignal,
-    fieldRecall: computeFieldRecall(options.captureDir ?? './norte-guard-captures'),
+    // The corpus goes in with it: a capture npm's marker has labelled is a
+    // removal the sweep may predate, and both halves of coverage need it.
+    fieldRecall: computeFieldRecall(options.captureDir ?? './norte-guard-captures', corpus.samples),
     sampleResults,
     assumptions: cleanSampleAssumptions(falsePositives.n),
     // In the object, not only printed, so the caveat survives being quoted.
@@ -327,14 +336,23 @@ async function analyzeCleanCorpus(
   return results
 }
 
+// A verdict that rests on a fact nobody could establish. The signal type says
+// so explicitly rather than being inferred from the wording of a description.
+const UNVERIFIED_SIGNAL = 'fabricated_profile_unverified'
+
 export function buildRecallReport(
   corpus: LabeledCorpus,
   results: SampleResult[]
 ): RecallReport {
   const confirmed = corpus.confirmedMalicious.length
   const unreadable = results.filter(r => r.error).length
-  const analyzed = results.length - unreadable
-  const tp = results.filter(r => r.detected).length
+  const readable = results.filter(r => !r.error)
+  const unevaluated = readable.filter(
+    r => !r.detected && r.result?.signals.some(s => s.type === UNVERIFIED_SIGNAL)
+  ).length
+
+  const analyzed = readable.length - unevaluated
+  const tp = readable.filter(r => r.detected).length
   const fn = analyzed - tp
 
   if (confirmed === 0) {
@@ -346,6 +364,7 @@ export function buildRecallReport(
       truePositives: 0,
       falseNegatives: 0,
       unreadable: 0,
+      unevaluated: 0,
       conservativeValue: null,
       // The line that must never read "0%".
       statement: 'not calculable, 0 confirmed_malicious samples',
@@ -362,9 +381,21 @@ export function buildRecallReport(
       truePositives: 0,
       falseNegatives: 0,
       unreadable,
-      conservativeValue: null,
-      statement: `not calculable: ${confirmed} confirmed, none readable`,
-      detail: `${unreadable} unreadable .ngpack files: the corpus is broken, not the detector`,
+      unevaluated,
+      // Zero, not null: nothing was detected and something was held out, so the
+      // conservative reading exists and is 0%. Left null the line that prints it
+      // never runs, which is the case where a reader most needs it.
+      conservativeValue: unreadable + unevaluated > 0 ? 0 : null,
+      statement: unevaluated > 0
+        ? `not calculable: ${unevaluated} of ${confirmed} confirmed could not be judged ` +
+          `(the conjunction needs a download count and none was available)`
+        : `not calculable: ${confirmed} confirmed, none readable`,
+      // Both causes, when both apply: an unreadable corpus and an unevaluable
+      // rule are different problems and are fixed by different work.
+      detail: [
+        unreadable > 0 ? `${unreadable} unreadable .ngpack files: the corpus is broken, not the detector` : null,
+        unevaluated > 0 ? `${unevaluated} unevaluable: run without NORTE_GUARD_OFFLINE, or capture the count with the snapshot` : null,
+      ].filter(Boolean).join('; '),
     }
   }
 
@@ -376,7 +407,8 @@ export function buildRecallReport(
     truePositives: tp,
     falseNegatives: fn,
     unreadable,
-    conservativeValue: tp / (analyzed + unreadable),
+    unevaluated,
+    conservativeValue: tp / (analyzed + unreadable + unevaluated),
     statement: `${formatRateWithCI(tp, analyzed)} - ${tp}/${analyzed} confirmed_malicious`,
     detail: describeCorpusProgress(corpus),
   }
@@ -511,6 +543,19 @@ function renderFieldRecall(f: FieldRecallReport): void {
     `${f.scored.length} scored at publication${RESET}`
   )
 
+  // Where the fraction came from. Coverage was reported as 4/73 for two days
+  // after four of its own confirmed samples had stopped being in either half of
+  // it, because both numbers came from one file and nothing said when.
+  const e = f.evidence
+  console.log(
+    `${INDENT}${DIM}sources: sweep ${e.sweptAt ? `of ${e.sweptAt.slice(0, 19)}` : '(none)'} ` +
+    `${e.sweepTakedowns} removals / ${e.sweepObserved} observed - ` +
+    `live log ${e.liveLogTakedowns} - labelled captures ${e.labelledCaptures}${RESET}`
+  )
+  if (e.staleness) {
+    console.log(`${INDENT}${YELLOW}${e.staleness}${RESET}`)
+  }
+
   for (const sample of f.scored) {
     const mark = sample.gateBlocked ? '[blocked]' : '[missed] '
     console.log(
@@ -553,9 +598,13 @@ function renderBenchSummary(s: BenchSummary): void {
     console.log(`${INDENT}${YELLOW}${s.corpus.contamination}${RESET}`)
   }
 
-  if (s.recall.unreadable > 0 && s.recall.conservativeValue !== null) {
+  if ((s.recall.unreadable > 0 || s.recall.unevaluated > 0) && s.recall.conservativeValue !== null) {
+    const held = [
+      s.recall.unreadable > 0 ? `${s.recall.unreadable} unreadable` : null,
+      s.recall.unevaluated > 0 ? `${s.recall.unevaluated} unevaluable offline` : null,
+    ].filter(Boolean).join(', ')
     console.log(
-      `${INDENT}${RED}${s.recall.unreadable} unreadable snapshots excluded. ` +
+      `${INDENT}${RED}${held} excluded. ` +
       `Counting them as misses: ${pct(s.recall.conservativeValue)}${RESET}`
     )
   }

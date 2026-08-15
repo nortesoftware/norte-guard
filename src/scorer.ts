@@ -8,7 +8,7 @@ import type { Packument, VersionMeta } from './packument.js'
 import { extractCapabilities, velocityAnomaly } from './genome.js'
 import { previousVersion } from './packument.js'
 import { absoluteRiskSignals, provenanceLostSignal } from './absolute-risk.js'
-import { fabricatedProfile } from './fabricated-profile.js'
+import { fabricatedProfile, type FabricatedProfile } from './fabricated-profile.js'
 
 interface ScorerInput {
   packument: Packument
@@ -22,6 +22,13 @@ interface ScorerInput {
   // fabricated-profile conjunction reads it, and only when the four free
   // conditions already hold.
   weeklyDownloads?: number | null
+  // End of the week that count covers, so the conjunction can report whether the
+  // fifth condition measured anything.
+  downloadWindowEnd?: string | null
+  // The instant the age-based rules are measured against. An .ngpack passes the
+  // capture time so a snapshot answers the question as it stood, rather than
+  // ageing every sample by however long ago the corpus was collected.
+  now?: number
 }
 
 export function score(input: ScorerInput): Pick<InspectResultType, 'signals' | 'totalScore' | 'verdict' | 'regime' | 'newCapabilities' | 'historicalCapabilities' | 'baselineVersion'> {
@@ -255,7 +262,8 @@ export function hasGenomeRegime(genome: PackageGenome, now = Date.now()): boolea
 
 export function scoreWithRegime(input: ScorerInput & { genome: PackageGenome }) {
   const { genome } = input
-  const hasGenome = hasGenomeRegime(genome)
+  const now = input.now ?? Date.now()
+  const hasGenome = hasGenomeRegime(genome, now)
 
   if (!hasGenome) {
     // Two signals inline here meant a quarter of the ecosystem was judged on a
@@ -264,6 +272,7 @@ export function scoreWithRegime(input: ScorerInput & { genome: PackageGenome }) 
       packument: input.packument,
       currentMeta: input.currentMeta,
       dependencyAgeDays: input.dependencyAgeDays,
+      now,
     })
 
     const absoluteScore = signals.reduce((s, sig) => s + sig.score, 0)
@@ -278,6 +287,8 @@ export function scoreWithRegime(input: ScorerInput & { genome: PackageGenome }) 
       currentMeta: input.currentMeta,
       regime: 'no-genome',
       weeklyDownloads: input.weeklyDownloads,
+      downloadWindowEnd: input.downloadWindowEnd,
+      now,
     })
 
     if (profile.matches) {
@@ -287,6 +298,41 @@ export function scoreWithRegime(input: ScorerInput & { genome: PackageGenome }) 
         score: 0,
         description: profile.reason,
         isHistorical: false,
+      })
+    } else if (freeConjunctsHold(profile)) {
+      // The four free conditions hold and the fifth does not, or could not be
+      // established. That is 2.65% of the publish stream, so recording it costs
+      // almost nothing, and without it a near-miss is indistinguishable in the
+      // output from a package the rule never looked at.
+      //
+      // The two cases get different types on purpose. "Does not match" is a
+      // verdict; "could not be checked" is a gap, and something downstream has
+      // to be able to tell a sample the rule cleared from one it never got to
+      // judge — otherwise an offline benchmark reports the second as a miss.
+      //
+      // A rule that was switched off is neither of those. It gets the ordinary
+      // type, because 'unverified' is what moves a benchmark sample out of the
+      // recall denominator, and a run with the rule disabled must count its
+      // misses rather than quietly stop counting.
+      const ruleOff = input.config.blockFabricatedProfile !== true
+
+      signals.push({
+        type: ruleOff || profile.downloadsChecked
+          ? 'fabricated_profile_partial'
+          : 'fabricated_profile_unverified',
+        surface: 'install_time',
+        score: 0,
+        description: ruleOff
+          ? `Fabricated-package profile: the four free conditions hold. The rule is ` +
+            `switched off, so the download count was never requested and nothing follows ` +
+            `from this either way.`
+          : profile.downloadsChecked
+            ? `Fabricated-package profile, 4 of 5 conditions: ${profile.reason}`
+            : `Fabricated-package profile: the four free conditions hold and the download ` +
+              `count could not be established, so the rule does not apply. This is a gap, ` +
+              `not a clearance.`,
+        isHistorical: false,
+        informational: true,
       })
     }
 
@@ -313,4 +359,11 @@ export function scoreWithRegime(input: ScorerInput & { genome: PackageGenome }) 
 
   const result = score(input)
   return { ...result, regime: 'genome' as const }
+}
+
+// The four conditions that cost nothing, read off a profile already computed
+// rather than evaluated a second time.
+function freeConjunctsHold(profile: FabricatedProfile): boolean {
+  const c = profile.conjuncts
+  return c.noGenome && c.youngName && c.tiny && c.noRepository
 }

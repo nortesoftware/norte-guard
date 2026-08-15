@@ -10,6 +10,19 @@ export interface PackageSource {
 
   // Carried into verdicts so a result can be traced back to its origin.
   readonly sourceInfo: SourceInfo
+
+  // Facts that were true when the snapshot was taken and cannot be recovered
+  // afterwards. The weekly download count is the only one so far and it is
+  // enough to matter: the fabricated-profile conjunction needs it, npm reports
+  // one week at a time, and a count read next year answers a different
+  // question. Without this an .ngpack does not reproduce its own verdict, which
+  // is the one thing the format exists for.
+  capturedFacts?(name: string): CapturedFacts | null
+}
+
+export interface CapturedFacts {
+  weeklyDownloads?: number | null
+  downloadWindowEnd?: string | null
 }
 
 export interface SourceInfo {

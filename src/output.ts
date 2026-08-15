@@ -93,6 +93,19 @@ export function renderInspect(result: InspectResult, config: ThresholdConfig): s
 
   lines.push('')
   lines.push(`  ${DIM}Coverage: ${result.coverage.coveragePercent}% of the known attack surface${RESET}`)
+
+  // Printed whenever the evidence is not today's registry. A verdict on a purged
+  // version is only meaningful together with where it was read and as of when,
+  // and reading that off a snapshot silently would be the same mistake as
+  // reporting a stale number as fresh.
+  if (result.source.type !== 'registry') {
+    lines.push(
+      `  ${DIM}Source: ${result.source.type} ${result.source.location}` +
+      (result.source.capturedAt ? `, captured ${result.source.capturedAt}` : '') +
+      `${RESET}`
+    )
+    lines.push(`  ${DIM}Ages measured as of ${result.evaluatedAsOf}, not now${RESET}`)
+  }
   lines.push('')
 
   if (result.verdict === 'INSUFFICIENT_HISTORY') {
