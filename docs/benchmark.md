@@ -5,15 +5,48 @@
 ```bash
 norte-guard bench
 
-no-PASS gate  0.20% (IC 95% Wilson: 0.04%–1.12%, n=500)
-              BLOCK 0 (0.00%, exit 1) · WARN 1 (0.20%, exit 0)
-unevaluated   24.60% (95% Wilson CI: 21.03%-28.56%, n=500)
+non-PASS gate 0.60% (95% Wilson CI: 0.20%-1.75%, n=500)
+              BLOCK 1 (0.20%, exit 1) - WARN 2 (0.40%, exit 0)
+unevaluated   22.20% (95% Wilson CI: 18.78%-26.05%, n=500)
               INSUFFICIENT_HISTORY: informational, exit 0, does not fail the build
-              source: fp-bench-results/2026-08-12-v0.3.0.json (stratified sampling)
-Recall        not calculable, 0 confirmed_malicious samples
-              corpus building since 2026-08-12: 30 captures, 0 confirmed
-              30 captures excluded from every benchmark (captured with the broken gate)
+              source: fp-bench-results/2026-08-16-v1.1.0-2.json (stratified, engine v1.1.0)
+              the fabricated-profile rule has no candidate in this sample
+Recall        0.00% (95% Wilson CI: 0.00%-32.44%, n=8) - 0/8 confirmed_malicious
+              the fabricated-profile rule is opt-in and was off for this run, so
+              every sample of that class counts as a miss. Turning it on does not
+              raise this number either: their snapshots carry no download count.
+Field recall  0/9 blocked by the gate, 0/9 by audit
+              as scored at publication, by whatever engine was running that day
+  re-graded   not calculable: 9 samples, 7 the rule cannot judge, 2 with no snapshot
 ```
+
+**A saved rate declares the distance to the engine quoting it.**
+
+`bench` reads the most recent `fp-bench-results/` artifact. For two days it read
+one measured on v0.3.2 with the fabricated-profile rule switched off and printed
+its 0.20% next to v1.1.0 with the rule on, and nothing in the output said so. A
+rate is a measurement of a specific engine under a specific config, so the run
+now declares every way the two differ, and says `STALE` when they do.
+
+An artifact saved before a flag existed cannot say what it ran under. Absent is
+reported as absent rather than read as `false`: guessing on the file's behalf is
+the same error one level down.
+
+**A benchmark also declares what it cannot measure.**
+
+`fp-bench` draws its sample by weekly download rank, which is the right frame for
+"what does the gate cost on the dependencies people actually have". It is the
+wrong frame for the fabricated-profile conjunction, which fires only on a name
+under seven days old with zero weekly downloads — a package that by construction
+cannot rank. In the 2026-08-16 run, 0 of 500 packages had a name under seven days
+old and 0 had zero downloads, so **no package in the sample could have matched**.
+Its 0% is not evidence the rule is safe; it is evidence the sample holds nothing
+the rule could fire on, and the run now says so rather than leaving it to be
+inferred from a comment.
+
+Measuring that rule needs a sample of *legitimate brand-new packages*. The
+quarantine stream already collects exactly that population — see the precision
+block below.
 
 **Two headline numbers, never one.**
 
@@ -46,6 +79,22 @@ With zero confirmed samples the output says **`no calculable`**, never `0%`.
 Those are different claims. One says the detector caught nothing; the other says
 nothing has been put in front of it yet.
 
+**Field recall is two numbers.** `computeFieldRecall` grades the decision the
+collector made at the time, read out of `changes-log.ndjson`. That is the only
+honest answer to "was this caught when it happened", and it is not an answer to
+"would this be caught now" — the log line was written by whatever engine ran that
+day, under rules that may not have existed. Worse, the collector logs one *audit*
+verdict per publication and never passes a download count into the scorer, so the
+fabricated-profile rule can never appear on that path: a zero out of that number
+is a fact about the log format.
+
+So the second number is computed rather than read. Each sample is re-run through
+the engine in this build, against the `.ngpack` captured at the time and dated to
+the capture, so what differs between the two numbers is the engine and nothing
+else. Samples the rule cannot judge are held out of the fraction, for the same
+reason recall holds them out: a rule that declined to apply is not a rule that
+was wrong.
+
 **Provenance is part of the sample.** Every capture records which engine selected
 it and why. Captures taken while the gate was scoring packages against a genome
 they did not have are marked `pre-fix-gate-bug` and held out of every benchmark,
@@ -55,6 +104,65 @@ ecosystem, and nothing downstream can correct for a bias it cannot see.
 
 Every rate carries a Wilson interval. The normal approximation puts the lower
 bound below zero at exactly the sample sizes this project works with.
+
+## Two criteria, and they are not the same criterion
+
+Two things in this project were both called "the four free conditions":
+
+**The capture filter** — no genome, name under seven days, under 100KB, no
+repository. It decides what the collector keeps, and it is what
+`captureReason=quarantine-no-genome` records.
+
+**The fabricated-profile rule** — those four *and a fifth*, zero weekly
+downloads, which the rule declines to apply without. It is what fails a build.
+
+They were being read as one, and that produced a contradiction that shipped:
+`track` reported "8 confirmed removals, PROMOTABLE to default" while `bench`
+reported the same eight as unjudgeable. Both were right about their own
+criterion. The eight are removals of packages the *filter* kept; whether the
+*rule* would have blocked them is unknowable, because their snapshots carry no
+download count and npm serves one complete week at a time.
+
+So each record now declares which criterion it is evidence for — `rule-matched`,
+`rule-cleared` or `unverifiable` — and the promotion criterion counts only
+removals the rule itself would have caused.
+
+**The criterion also has to survive being read early.** npm removes a fabricated
+package within hours, so every true positive arrives on day one. A false positive
+is *defined* as thirty days alive and installed by somebody, so none can arrive
+before day thirty. A criterion that simply counts both therefore reports
+PROMOTABLE on day three for any rule at all, including one that blocks nothing
+but ordinary new packages. Packages already alive with real usage now count
+against promotion before their thirty days are up.
+
+## `corpus` — the precision denominator
+
+A count of confirmed removals is a numerator looking for a denominator. Eight out
+of fifty and eight out of fifteen hundred are opposite conclusions about the same
+filter, so `corpus` reports the fraction:
+
+```
+PRECISION OF THE CAPTURE FILTER (4 conditions, captureReason=quarantine-no-genome)
+  marked                          1509 packages in 2329 captures
+  removed by npm                  8
+  alive with >=10 weekly downloads  4  (of 19 ever queried)
+  precision                       0.53% (95% Wilson CI: 0.27%-1.04%, n=1509)
+  precision at >=30d               not calculable: 0 of 1509 have reached 30 days
+  oldest marked 3.2 days, median 2 days
+```
+
+The unit is the **package**, not the capture: the same name is captured again on
+every publication, so counting captures multiplies whichever packages publish
+most and turns a precision into a publishing-frequency artifact.
+
+The maturity line is not decoration. With the oldest marked package at 3.2 days,
+nothing in that denominator has had time to resolve, and for the reason above the
+number counts every hit and almost no miss — it is an upper bound that will fall.
+The mature fraction is reported separately and says `not calculable` until
+packages are old enough for it.
+
+"Alive" is measured only over packages the tracker has actually queried, over its
+own denominator, and the output says it must not be scaled up to the rest.
 
 ```bash
 norte-guard corpus                    # what is captured, labelled, and held out

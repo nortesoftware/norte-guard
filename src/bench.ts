@@ -24,14 +24,19 @@ import {
 import { formatRateWithCI, rateWithCI, pct, type RateWithCI } from './stats.js'
 import { tallySignals, renderPartition, type SignalPartition, type SignalRef } from './signal-report.js'
 import {
-  loadLatestArtifact,
+  loadArtifacts,
   engineVersion,
   cleanSampleAssumptions,
   type FpBenchArtifact,
   type FpBenchPackageResult,
 } from './fp-bench-store.js'
-import { computeFieldRecall, type FieldRecallReport } from './field-recall.js'
-import type { InspectResult } from './types.js'
+import {
+  computeFieldRecall,
+  regradeWithCurrentEngine,
+  type FieldRecallReport,
+  type CurrentEngineRecall,
+} from './field-recall.js'
+import { DEFAULT_THRESHOLDS, type InspectResult } from './types.js'
 
 export interface CleanEntry {
   package: string
@@ -92,6 +97,14 @@ export interface FalsePositiveReport {
   statement: string
   unevaluatedStatement: string | null
   breakdown: string | null
+  // Every way the saved run differs from the engine about to be shipped. A
+  // benchmark quoted next to an engine it did not measure is worse than no
+  // benchmark, because it reads as current.
+  staleness: string[]
+  // What the run could not measure however recent it is. fp-bench ranks its
+  // sample by weekly downloads, so the fabricated-profile conjunction has almost
+  // no candidate in it by construction and a 0% from that sample bounds nothing.
+  blindSpots: string[]
 }
 
 export interface BenchSummary {
@@ -122,6 +135,11 @@ export interface BenchSummary {
   // them. The label is the registry's, the verdict is the one issued before the
   // removal existed.
   fieldRecall: FieldRecallReport
+  // The same samples put through the engine in this build. Kept separate from
+  // fieldRecall rather than replacing it: one says whether the collector caught
+  // it at the time, the other says whether this engine would, and a single
+  // number cannot mean both.
+  fieldRecallNow: CurrentEngineRecall
   sampleResults: SampleResult[]
   assumptions: string[]
   survivorshipBias: string
@@ -180,7 +198,9 @@ export async function runBench(options: BenchOptions = {}): Promise<BenchSummary
   console.log()
 
   const sampleResults = await analyzeConfirmedMalicious(corpus.confirmedMalicious, mode)
-  const recall = buildRecallReport(corpus, sampleResults)
+  const recall = buildRecallReport(
+    corpus, sampleResults, DEFAULT_THRESHOLDS[mode].blockFabricatedProfile === true
+  )
 
   const cleanResults = offline
     ? []
@@ -203,6 +223,9 @@ export async function runBench(options: BenchOptions = {}): Promise<BenchSummary
   )
 
   const references = resolveReferences(corpus, KNOWN_ATTACK_REFERENCES)
+
+  const fieldRecall = computeFieldRecall(options.captureDir ?? './norte-guard-captures', corpus.samples)
+  const fieldRecallNow = await regradeWithCurrentEngine(fieldRecall.scored, corpus.samples, mode)
 
   const summary: BenchSummary = {
     mode,
@@ -230,7 +253,8 @@ export async function runBench(options: BenchOptions = {}): Promise<BenchSummary
     bySignal,
     // The corpus goes in with it: a capture npm's marker has labelled is a
     // removal the sweep may predate, and both halves of coverage need it.
-    fieldRecall: computeFieldRecall(options.captureDir ?? './norte-guard-captures', corpus.samples),
+    fieldRecall,
+    fieldRecallNow,
     sampleResults,
     assumptions: cleanSampleAssumptions(falsePositives.n),
     // In the object, not only printed, so the caveat survives being quoted.
@@ -342,7 +366,15 @@ const UNVERIFIED_SIGNAL = 'fabricated_profile_unverified'
 
 export function buildRecallReport(
   corpus: LabeledCorpus,
-  results: SampleResult[]
+  results: SampleResult[],
+  // Whether the run that produced these results had the fabricated-profile rule
+  // on. It changes what the number means and not only its value: with the rule
+  // off, every sample of this class is a genuine miss and recall is 0%; with it
+  // on, a sample whose snapshot has no download count is unjudgeable and leaves
+  // the fraction. A 0% that does not say which of the two it is invites being
+  // read as "the detector does not work" when it means "the detector was not
+  // asked".
+  ruleEnabled = DEFAULT_THRESHOLDS.gate.blockFabricatedProfile === true
 ): RecallReport {
   const confirmed = corpus.confirmedMalicious.length
   const unreadable = results.filter(r => r.error).length
@@ -410,7 +442,14 @@ export function buildRecallReport(
     unevaluated,
     conservativeValue: tp / (analyzed + unreadable + unevaluated),
     statement: `${formatRateWithCI(tp, analyzed)} - ${tp}/${analyzed} confirmed_malicious`,
-    detail: describeCorpusProgress(corpus),
+    detail: [
+      describeCorpusProgress(corpus),
+      ruleEnabled
+        ? null
+        : 'the fabricated-profile rule is opt-in and was off for this run, so every sample of ' +
+          'that class counts as a miss. Turning it on does not raise this number either: their ' +
+          'snapshots carry no download count, so the rule would decline to judge them.',
+    ].filter(Boolean).join('. '),
   }
 }
 
@@ -423,7 +462,19 @@ export function buildFalsePositiveReport(input: {
   offline: boolean
   fpResultsDir?: string
 }): FalsePositiveReport {
-  const latest = loadLatestArtifact(input.fpResultsDir)
+  // The newest artifact that actually measured this engine, and only failing
+  // that the newest one at all.
+  //
+  // "Newest wins" is the rule that produced the defect this guard exists for:
+  // an ablation run saved an hour after the run that matches the shipped config
+  // takes precedence over it, and bench then reports a rate for a config nobody
+  // ships while the right file sits on disk beside it. Declaring the mismatch is
+  // necessary and is not the same as preferring it.
+  const artifacts = loadArtifacts(input.fpResultsDir)
+  const latest =
+    artifacts.find(a => artifactStaleness(a.artifact, input.mode).length === 0) ??
+    artifacts[0] ??
+    null
 
   if (latest) {
     // Counted from the per-package verdicts so artifacts saved before these
@@ -434,6 +485,8 @@ export function buildFalsePositiveReport(input: {
       source: 'fp-bench',
       sourceDetail:
         `${latest.path} (sampling: ${latest.artifact.sampling.mode}, engine v${latest.artifact.engineVersion})`,
+      staleness: artifactStaleness(latest.artifact, input.mode),
+      blindSpots: artifactBlindSpots(latest.artifact),
       nonPass: counts.nonPass,
       blocked: counts.blocked,
       warned: counts.warned,
@@ -460,6 +513,8 @@ export function buildFalsePositiveReport(input: {
       statement: 'not measured. Run `npm run fp-bench` (offline: no network and no saved runs)',
       unevaluatedStatement: null,
       breakdown: null,
+      staleness: [],
+      blindSpots: [],
     }
   }
 
@@ -480,7 +535,90 @@ export function buildFalsePositiveReport(input: {
     statement: formatRateWithCI(blocked + warned, judged.length),
     unevaluatedStatement: formatRateWithCI(insufficient, judged.length),
     breakdown: `BLOCK ${blocked} (exit 1) - WARN ${warned} (exit 0)`,
+    staleness: [],
+    blindSpots: [],
   }
+}
+
+// The engine that produced a saved rate, against the engine about to quote it.
+//
+// The 0.20% this file reported for two days was measured on v0.3.2 with the
+// fabricated-profile rule switched off, and nothing in the output said so. A
+// rate is a measurement of a specific engine under a specific config; carrying
+// the file forward without carrying that is how a benchmark becomes a claim.
+export function artifactStaleness(
+  artifact: FpBenchArtifact,
+  mode: 'gate' | 'audit'
+): string[] {
+  const out: string[] = []
+  const running = engineVersion()
+
+  if (artifact.engineVersion !== running) {
+    out.push(
+      `measured on engine v${artifact.engineVersion}, this build is v${running}: ` +
+      `the rate belongs to a different scorer. Re-run \`npm run fp-bench\`.`
+    )
+  }
+
+  const saved = artifact.thresholds?.[mode] as (typeof artifact.thresholds)[typeof mode] | undefined
+  const current = DEFAULT_THRESHOLDS[mode]
+
+  if (saved && saved.blockScore !== current.blockScore) {
+    out.push(
+      `measured at blockScore ${saved.blockScore}, this build ships ${current.blockScore}`
+    )
+  }
+
+  // An artifact with no such key predates the flag, and a flag that did not
+  // exist was not on — so this is an inference, not a guess, and it is stated as
+  // one. What it must never become is silence: a saved run measured without the
+  // rule, quoted beside a build that ships it, is the exact reading this
+  // function exists to prevent.
+  const recorded = saved !== undefined && 'blockFabricatedProfile' in saved
+  const savedRule = recorded ? saved!.blockFabricatedProfile === true : false
+  const currentRule = current.blockFabricatedProfile === true
+
+  if (savedRule !== currentRule) {
+    out.push(
+      `measured with the fabricated-profile rule ${savedRule ? 'ON' : 'OFF'}` +
+      (recorded ? '' : ' (the artifact predates the flag, so it cannot have been on)') +
+      `, this build ships it ${currentRule ? 'ON' : 'OFF'}`
+    )
+  }
+
+  return out
+}
+
+// What this benchmark cannot measure however fresh it is.
+//
+// fp-bench draws its sample by weekly download rank, which is the right frame
+// for "what does the gate cost on the dependencies people actually have". It is
+// the wrong frame for the fabricated-profile rule, which fires only on a name
+// under seven days old with zero downloads — a package that by construction
+// cannot rank. A 0-of-500 from this sample is not evidence the rule is safe; it
+// is evidence the sample contains nothing the rule could fire on.
+export function artifactBlindSpots(artifact: FpBenchArtifact): string[] {
+  const rows = artifact.packages.filter(p => !p.error && p.fabricatedProfile)
+  if (rows.length === 0) {
+    return [
+      'the artifact does not record the conjunction per package, so what the ' +
+      'fabricated-profile rule saw in this sample is unknown',
+    ]
+  }
+
+  const candidates = rows.filter(p => p.fabricatedProfile!.localConjuncts).length
+  if (candidates > 0) return []
+
+  const young = rows.filter(p => p.fabricatedProfile!.conjuncts['youngName']).length
+  const zero = rows.filter(p => p.fabricatedProfile!.conjuncts['zeroDownloads']).length
+
+  return [
+    `the fabricated-profile rule has no candidate in this sample: ${young}/${rows.length} names under ` +
+    `seven days old, ${zero}/${rows.length} with zero weekly downloads. The sample is ranked by ` +
+    `downloads, so the class the rule targets cannot appear in it. Its 0% bounds nothing about ` +
+    `this rule — measuring it needs a sample of legitimate brand-new packages, which is what the ` +
+    `quarantine stream already collects.`,
+  ]
 }
 
 function countVerdicts(artifact: FpBenchArtifact, mode: 'gate' | 'audit') {
@@ -522,12 +660,29 @@ const INDENT = ' '.repeat(LABEL_WIDTH)
 // Kept apart from the .ngpack recall above because the two rest on different
 // evidence: this one has npm's verdict and the score the collector issued before
 // it, and no artifact.
-function renderFieldRecall(f: FieldRecallReport): void {
+function renderFieldRecall(f: FieldRecallReport, now: CurrentEngineRecall): void {
   if (f.takedownsFound === 0 && f.preTakedownObservations === 0) return
 
   const color = f.calculable ? GREEN : YELLOW
   console.log(
-    `${color}${'Field recall'.padEnd(LABEL_WIDTH)}${f.calculable ? f.statement : f.statement}${RESET}`
+    `${color}${'Field recall'.padEnd(LABEL_WIDTH)}${f.statement}${RESET}`
+  )
+  // Said explicitly, because the number above was being read as a verdict on
+  // this engine. It is a verdict on the one that wrote the log, under the rules
+  // that existed then.
+  console.log(
+    `${INDENT}${DIM}as scored at publication, by whatever engine was running that day${RESET}`
+  )
+  console.log(
+    `${(now.recall?.rate ?? 0) > 0 ? GREEN : YELLOW}${'  re-graded'.padEnd(LABEL_WIDTH)}` +
+    `${now.statement}${RESET}`
+  )
+  console.log(
+    `${INDENT}${DIM}the same samples re-read from their .ngpack by this build, mode ${now.mode}, ` +
+    `fabricated-profile rule ${now.ruleEnabled ? 'forced ON' : 'as shipped'}` +
+    (now.unevaluable > 0 ? `; ${now.unevaluable} the rule cannot judge` : '') +
+    (now.noSnapshot > 0 ? `; ${now.noSnapshot} with no snapshot` : '') +
+    `${RESET}`
   )
   // Reported on its own line because it answers a different question from
   // recall: whether the collector is there in time at all.
@@ -556,11 +711,24 @@ function renderFieldRecall(f: FieldRecallReport): void {
     console.log(`${INDENT}${YELLOW}${e.staleness}${RESET}`)
   }
 
+  // Both verdicts on one line. A list showing only the historical one is what
+  // made "0/9 missed" look like a statement about the shipped engine.
+  const regraded = new Map(now.samples.map(r => [`${r.package}@${r.version}`, r]))
   for (const sample of f.scored) {
+    const key = `${sample.package}@${sample.version}`
+    const r = regraded.get(key)
     const mark = sample.gateBlocked ? '[blocked]' : '[missed] '
+    const nowMark = !r ? '[not re-graded]'
+                  : r.blocked ? '[blocked now]'
+                  : r.unevaluable ? '[unjudgeable]'
+                  : r.currentVerdict === null ? '[no snapshot]'
+                  : '[missed now] '
     console.log(
-      `${INDENT}${mark} ${`${sample.package}@${sample.version}`.padEnd(38)} ` +
+      `${INDENT}${mark} ${key.padEnd(38)} ` +
       `score=${String(sample.score).padStart(3)} ${DIM}${sample.regime}, audit ${sample.auditVerdict}${RESET}`
+    )
+    console.log(
+      `${INDENT}${' '.repeat(10)}${nowMark.padEnd(16)} ${DIM}${r?.detail ?? 'not re-graded'}${RESET}`
     )
   }
   for (const sample of f.unscored) {
@@ -589,6 +757,12 @@ function renderBenchSummary(s: BenchSummary): void {
     console.log(`${INDENT}${DIM}INSUFFICIENT_HISTORY: informational, exit 0, does not fail the build${RESET}`)
   }
   console.log(`${INDENT}${DIM}source: ${s.falsePositives.sourceDetail}${RESET}`)
+  for (const line of s.falsePositives.staleness) {
+    console.log(`${INDENT}${RED}STALE: ${line}${RESET}`)
+  }
+  for (const line of s.falsePositives.blindSpots) {
+    console.log(`${INDENT}${YELLOW}${line}${RESET}`)
+  }
 
   const recallColor = s.recall.calculable ? GREEN : YELLOW
   console.log(`${recallColor}${'Recall'.padEnd(LABEL_WIDTH)}${s.recall.statement}${RESET}`)
@@ -609,7 +783,7 @@ function renderBenchSummary(s: BenchSummary): void {
     )
   }
 
-  renderFieldRecall(s.fieldRecall)
+  renderFieldRecall(s.fieldRecall, s.fieldRecallNow)
 
   console.log('-'.repeat(66))
 

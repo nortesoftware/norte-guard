@@ -10,6 +10,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { writeFileSync } from 'node:fs'
+import { rateWithCI, type RateWithCI } from './stats.js'
+import { EXPIRY_LOG as EXPIRY_LOG_NAME } from './capture-budget.js'
 import type { CaptureComposition, CaptureLabel, CaptureMetadata, NgpackManifest } from './ngpack.js'
 
 export interface CorpusSample {
@@ -28,6 +30,17 @@ export interface CorpusSample {
   labelAssumed: boolean
   captureReason?: string
   engineVersion?: string
+  // The weekly download count as it stood at capture, when the watcher recorded
+  // it. This is the fifth conjunct of the fabricated-profile rule, and the only
+  // copy of it that will ever exist: npm serves one complete week at a time, so
+  // a snapshot taken without it can never be re-judged by the rule. Undefined
+  // means it was never recorded, which is not the same as zero.
+  weeklyDownloads?: number | null
+  downloadWindowEnd?: string | null
+  // Whether that week overlapped the package's life. A zero without it cannot be
+  // told from npm's 404 for a name it never had, and npm answers 404 for almost
+  // every package of this class.
+  downloadWindowCovers?: boolean | null
   composition?: CaptureComposition
   // Known-biased selection, or unknown provenance. A corpus assembled by a
   // detector with a known bug is a draw from what that bug flagged, not from the
@@ -147,6 +160,9 @@ function readSample(dir: string): CorpusSample | null {
     labelAssumed: false,
     captureReason: meta.captureReason,
     engineVersion: meta.engineVersion,
+    weeklyDownloads: meta.weeklyDownloads,
+    downloadWindowEnd: meta.downloadWindowEnd,
+    downloadWindowCovers: meta.downloadWindowCovers,
     composition: meta.composition ?? compositionFromNotes(meta.notes),
     ...classifyContamination(meta.captureReason, false),
   }
@@ -236,6 +252,181 @@ export function describeComposition(samples: CorpusSample[]): CorpusComposition 
       .sort(([, a], [, b]) => b - a)
       .slice(0, 10)
       .map(([signal, count]) => ({ signal, count })),
+  }
+}
+
+// The denominator. Without it the corpus can report eight confirmed removals and
+// nothing at all about what they were eight out of, and eight out of fifty and
+// eight out of fifteen hundred are opposite conclusions about the same rule.
+//
+// The unit is the PACKAGE, not the capture. The same name is captured again on
+// every publication, so counting captures multiplies whichever packages publish
+// most and turns a precision into a publishing-frequency artifact. Captures are
+// reported alongside because they are what the disk cost is measured in.
+export interface ClassPrecision {
+  // Everything the capture filter marked, whatever became of it.
+  markedCaptures: number
+  markedPackages: number
+  // npm published 0.0.1-security over it. Known from the takedown log the
+  // watcher writes live and from any sweep on disk, which is the same authority
+  // the labels come from.
+  removed: number
+  // Alive at the last check and installed by somebody. Only knowable for
+  // packages the tracker has actually queried, so it is reported over its own
+  // denominator and never over the marked total.
+  observedAlive: number
+  observedAliveWithUsage: number
+  precision: RateWithCI | null
+  // The same fraction over packages old enough for the verdict to mean
+  // something. A package marked yesterday is neither a hit nor a miss yet, and
+  // folding it into the denominator understates precision by however much of the
+  // corpus is too young to have resolved.
+  matureDays: number
+  maturePackages: number
+  matureRemoved: number
+  maturePrecision: RateWithCI | null
+  // Names counted from the expiry log because their artifacts are gone.
+  expiredPackages: number
+  oldestMarkedDays: number | null
+  medianMarkedDays: number | null
+  // What the number cannot say, in the same object as the number.
+  caveats: string[]
+}
+
+export function classPrecision(input: {
+  samples: CorpusSample[]
+  captureReason: string
+  // Every package known to have been removed, from whichever source knows it.
+  removedPackages: Set<string>
+  // Names the filter marked whose artifacts have since been deleted by retention
+  // or by the disk cap. They belong in the denominator: the package was marked,
+  // and the deleter is not evidence about it either way. Leaving them out would
+  // let precision climb as the corpus aged, because both deleters protect
+  // labelled captures and take unlabelled ones oldest-first — the numerator is
+  // safe and the denominator is not.
+  expired?: Array<{ package: string; capturedAt: string; captureReason?: string }>
+  // package -> the highest weekly download count the tracker has seen for it.
+  observedDownloads?: Map<string, number>
+  realUsageDownloads: number
+  matureDays: number
+  // How long an unconfirmed capture of this class is kept. When it is shorter
+  // than matureDays the mature fraction can never be rebuilt from surviving
+  // directories, and saying "not yet" would be wrong in a way that never
+  // corrects itself.
+  retentionDays?: number
+  now?: number
+}): ClassPrecision {
+  const now = input.now ?? Date.now()
+
+  // Earliest capture per package: the clock starts when the filter first marked
+  // it, not when it was last re-captured.
+  const firstMarked = new Map<string, string>()
+  let markedCaptures = 0
+  for (const s of input.samples) {
+    if (s.captureReason !== input.captureReason) continue
+    markedCaptures++
+    const seen = firstMarked.get(s.package)
+    if (seen === undefined || s.capturedAt < seen) firstMarked.set(s.package, s.capturedAt)
+  }
+
+  let expiredPackages = 0
+  for (const e of input.expired ?? []) {
+    if (e.captureReason !== input.captureReason) continue
+    // A name that was re-captured after the old artifact expired is already
+    // counted, and the earlier date is the one the clock should run from.
+    const seen = firstMarked.get(e.package)
+    if (seen === undefined) expiredPackages++
+    if (seen === undefined || e.capturedAt < seen) firstMarked.set(e.package, e.capturedAt)
+  }
+
+  const ages = [...firstMarked.values()]
+    .map(at => (now - new Date(at).getTime()) / 86_400_000)
+    .filter(d => Number.isFinite(d))
+    .sort((a, b) => a - b)
+
+  const markedPackages = firstMarked.size
+  const removed = [...firstMarked.keys()].filter(p => input.removedPackages.has(p)).length
+
+  const mature = [...firstMarked.entries()].filter(
+    ([, at]) => (now - new Date(at).getTime()) / 86_400_000 >= input.matureDays
+  )
+  const matureRemoved = mature.filter(([p]) => input.removedPackages.has(p)).length
+
+  const tracked = [...firstMarked.keys()].filter(p => input.observedDownloads?.has(p))
+  const observedAliveWithUsage = tracked.filter(
+    p => (input.observedDownloads!.get(p) ?? 0) >= input.realUsageDownloads
+  ).length
+
+  const caveats: string[] = []
+  if (mature.length === 0) {
+    // A LOWER bound, and the direction matters. Every marked name is in the
+    // denominator from the moment it was marked, whatever becomes of it, so the
+    // denominator is already complete for this cohort and only the numerator can
+    // still move — upward, as removals that have not happened yet arrive. The
+    // first version of this line said "upper bound" and had the arithmetic
+    // backwards.
+    caveats.push(
+      `no marked package has reached ${input.matureDays} days yet (oldest ${ages[ages.length - 1]?.toFixed(1) ?? '0'} days), ` +
+      `so nothing in this denominator has resolved. The denominator is complete for this cohort and ` +
+      `the numerator is not, so this is a LOWER bound: it can only rise as removals arrive.`
+    )
+  }
+  if (input.retentionDays !== undefined && input.retentionDays < input.matureDays) {
+    caveats.push(
+      `the mature fraction cannot be rebuilt from surviving captures at all: quarantine retention is ` +
+      `${input.retentionDays} days and a verdict takes ${input.matureDays}, so no unconfirmed capture ` +
+      `of this class ever reaches the age its answer needs. It is calculable only because the names ` +
+      `outlive the artifacts in ${EXPIRY_LOG_NAME}.`
+    )
+  }
+  if (expiredPackages > 0) {
+    caveats.push(
+      `${expiredPackages} marked packages are counted from the expiry log: their artifacts were ` +
+      `deleted by retention or the disk cap. Both deleters keep labelled captures and take unlabelled ` +
+      `ones oldest-first, so without that log this fraction would climb on its own as the corpus aged.`
+    )
+  }
+  // Wilson assumes independent trials, and these are not. The removals arrive in
+  // campaigns: one operator publishes a family of names within minutes and npm
+  // removes the family within seconds of each other. The interval is reported
+  // because a bare rate invites more precision than any n supports, but its
+  // width is the width for independent draws and the true one is wider.
+  if (removed > 1) {
+    caveats.push(
+      `the ${removed} removals are not ${removed} independent events: this class arrives in campaigns, ` +
+      `several names published minutes apart and removed together. The Wilson interval assumes ` +
+      `independent trials, so read it as narrower than the truth.`
+    )
+  }
+  if (tracked.length > 0 && observedAliveWithUsage > 0) {
+    caveats.push(
+      `${observedAliveWithUsage} of the ${tracked.length} marked packages the tracker has queried are alive with ` +
+      `>=${input.realUsageDownloads} weekly downloads. On that sample the class contains more packages ` +
+      `somebody installs than packages npm removed.`
+    )
+  }
+  if (tracked.length < markedPackages) {
+    caveats.push(
+      `${markedPackages - tracked.length} of ${markedPackages} marked packages have never been queried, so ` +
+      `"alive" is measured on ${tracked.length} and must not be scaled up to the rest.`
+    )
+  }
+
+  return {
+    markedCaptures,
+    markedPackages,
+    removed,
+    observedAlive: tracked.length,
+    observedAliveWithUsage,
+    precision: markedPackages > 0 ? rateWithCI(removed, markedPackages) : null,
+    matureDays: input.matureDays,
+    maturePackages: mature.length,
+    matureRemoved,
+    maturePrecision: mature.length > 0 ? rateWithCI(matureRemoved, mature.length) : null,
+    expiredPackages,
+    oldestMarkedDays: ages.length > 0 ? Math.round(ages[ages.length - 1]! * 10) / 10 : null,
+    medianMarkedDays: ages.length > 0 ? Math.round(ages[Math.floor(ages.length / 2)]! * 10) / 10 : null,
+    caveats,
   }
 }
 

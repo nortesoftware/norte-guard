@@ -19,6 +19,14 @@ export interface WeeklyDownloads {
   // reading a tautology as a finding.
   start: string | null
   end: string | null
+  // The count is a 404 read as zero: npm has no record for the name at all.
+  // For a package published minutes ago that is the normal answer and it is not
+  // a measurement of anything — there is no window, so nothing can be said about
+  // whether a download could have happened. Kept because after this object is
+  // serialised into a capture nothing else can tell the two zeros apart, and a
+  // caller that grades one as evidence for a blocking rule would be
+  // manufacturing it.
+  synthesizedFrom404: boolean
 }
 
 export async function fetchWeeklyDownloads(name: string, timeoutMs = 10_000): Promise<number | null> {
@@ -41,8 +49,13 @@ export function fetchWeeklyDownloadsWindow(
       timeout: timeoutMs,
     }, res => {
       // 404 means npm has no download record for the name. For a package
-      // published minutes ago that is the normal answer and it means zero.
-      if (res.statusCode === 404) { res.resume(); return resolve({ downloads: 0, start: null, end: null }) }
+      // published minutes ago that is the normal answer, and it is reported as
+      // zero-with-no-window rather than as zero: the conjunction may treat it as
+      // a match, but nothing downstream may treat it as evidence.
+      if (res.statusCode === 404) {
+        res.resume()
+        return resolve({ downloads: 0, start: null, end: null, synthesizedFrom404: true })
+      }
       if ((res.statusCode ?? 0) >= 400) { res.resume(); return resolve(null) }
 
       let body = ''
@@ -51,7 +64,12 @@ export function fetchWeeklyDownloadsWindow(
         try {
           const parsed = JSON.parse(body) as { downloads?: number; start?: string; end?: string }
           resolve(typeof parsed.downloads === 'number'
-            ? { downloads: parsed.downloads, start: parsed.start ?? null, end: parsed.end ?? null }
+            ? {
+                downloads: parsed.downloads,
+                start: parsed.start ?? null,
+                end: parsed.end ?? null,
+                synthesizedFrom404: false,
+              }
             : null)
         } catch {
           resolve(null)

@@ -26,12 +26,15 @@ async function main(): Promise<void> {
     const mode = args.includes('--mode=audit') ? 'audit' : 'gate'
     const json = args.includes('--json')
 
-    // On by default since four confirmed removals and zero false positives; see
-    // types.ts for the evidence. --block-fabricated-profile is kept because
-    // existing invocations pass it, and it now asks for what it already gets.
+    // Opt-in: the evidence that switched it on turned out to be evidence about
+    // the capture filter rather than about this rule, and types.ts records how.
+    // --no-block-fabricated-profile is still accepted so invocations written
+    // while it was default-on keep working, and it now asks for what it gets.
     const config = {
       ...DEFAULT_THRESHOLDS[mode],
-      blockFabricatedProfile: !args.includes('--no-block-fabricated-profile'),
+      blockFabricatedProfile:
+        args.includes('--block-fabricated-profile') &&
+        !args.includes('--no-block-fabricated-profile'),
     }
 
     // The versions worth inspecting are the ones npm has already purged, and
@@ -222,6 +225,89 @@ async function main(): Promise<void> {
         console.log(`    ${signal.padEnd(34)} ${count}`)
       }
     }
+
+    // The precision of the filter that fills this corpus, which is the number
+    // that decides whether any of it can be published. A count of confirmed
+    // removals on its own is a numerator looking for a denominator.
+    const { classPrecision } = await import('./corpus.js')
+    const { QUARANTINE_CAPTURE_REASON, VERDICT_AFTER_DAYS, REAL_USAGE_DOWNLOADS, readObservations } =
+      await import('./watchlist.js')
+    const { readLiveTakedowns } = await import('./field-recall.js')
+    const { readExpiredCaptures, DEFAULT_QUARANTINE } = await import('./capture-budget.js')
+    const { formatRateWithCI } = await import('./stats.js')
+    const { existsSync: exists, readFileSync: readF } = await import('node:fs')
+    const { join: pjoin } = await import('node:path')
+
+    const captureDir = args.find(a => a.startsWith('--output='))?.split('=')[1] ?? './norte-guard-captures'
+    const removedPackages = readLiveTakedowns(captureDir)
+    // The sweep too: it is frozen at the moment it ran, but a removal it knows
+    // and the live log missed is still a removal.
+    const sweepPath = pjoin(captureDir, 'takedowns.json')
+    if (exists(sweepPath)) {
+      try {
+        const sweep = JSON.parse(readF(sweepPath, 'utf-8')) as { takenDown?: Array<{ package: string }> }
+        for (const t of sweep.takenDown ?? []) removedPackages.add(t.package)
+      } catch { /* one source down, not the end of the count */ }
+    }
+
+    // The highest count the tracker has ever seen for a package, not the latest:
+    // a name that was installed and then stopped being installed was still
+    // installed, and that is what decides whether blocking it was a mistake.
+    const observedDownloads = new Map<string, number>()
+    for (const o of readObservations(captureDir)) {
+      const seen = observedDownloads.get(o.package) ?? 0
+      observedDownloads.set(o.package, Math.max(seen, o.weeklyDownloads ?? 0))
+    }
+
+    const precision = classPrecision({
+      samples: corpus.samples,
+      captureReason: QUARANTINE_CAPTURE_REASON,
+      removedPackages,
+      // The names whose artifacts retention or the disk cap has taken. They were
+      // marked, so they stay in the denominator.
+      expired: readExpiredCaptures(pjoin(captureDir, 'captures')),
+      observedDownloads,
+      realUsageDownloads: REAL_USAGE_DOWNLOADS,
+      matureDays: VERDICT_AFTER_DAYS,
+      retentionDays: DEFAULT_QUARANTINE.retentionDays,
+    })
+
+    console.log('\nPRECISION OF THE CAPTURE FILTER (4 conditions, captureReason=' + QUARANTINE_CAPTURE_REASON + ')')
+    console.log(`  marked                          ${precision.markedPackages} packages in ${precision.markedCaptures} captures`)
+    console.log(`  removed by npm                  ${precision.removed}`)
+    // Not "alive": nothing has asked the registry about most of these. It is the
+    // remainder, and naming it as a remainder is what stops it being read as a
+    // count of surviving packages.
+    console.log(
+      `  not known to be removed         ${precision.markedPackages - precision.removed}` +
+      `  (unverified: no source has been asked about most of them)`
+    )
+    console.log(
+      `  alive with >=${REAL_USAGE_DOWNLOADS} weekly downloads  ${precision.observedAliveWithUsage}` +
+      `  (of ${precision.observedAlive} ever queried)`
+    )
+    console.log(
+      `  precision                       ` +
+      (precision.precision
+        ? formatRateWithCI(precision.removed, precision.markedPackages)
+        : 'not calculable, nothing marked')
+    )
+    console.log(
+      `  precision at >=${precision.matureDays}d               ` +
+      (precision.maturePrecision
+        ? formatRateWithCI(precision.matureRemoved, precision.maturePackages)
+        : `not calculable: 0 of ${precision.markedPackages} marked packages have reached ${precision.matureDays} days`)
+    )
+    console.log(
+      `  oldest marked ${precision.oldestMarkedDays ?? '-'} days, median ${precision.medianMarkedDays ?? '-'} days`
+    )
+    for (const caveat of precision.caveats) {
+      console.log(`  ! ${caveat}`)
+    }
+    console.log(
+      `  This is the filter that fills the corpus, not the rule that fails builds.\n` +
+      `  The rule needs a fifth condition the filter never evaluates.`
+    )
 
     if (!args.includes('--no-size')) {
       for (const root of corpus.roots) {
@@ -615,6 +701,13 @@ async function main(): Promise<void> {
         label: s.label,
         labelSource: s.labelSource,
         captureReason: s.captureReason,
+        // The fifth conjunct, or the fact that it was never recorded. Without it
+        // a removal confirms the capture filter and says nothing about the rule.
+        // The window travels with the count: a zero over a week that closed
+        // before the name existed is the same zero on disk and not the same
+        // fact.
+        weeklyDownloads: s.weeklyDownloads,
+        downloadWindowCovers: s.downloadWindowCovers,
         contaminated: s.contaminated,
       }))
     )
@@ -644,6 +737,49 @@ async function main(): Promise<void> {
     }
 
     const assessment = wl.assessPromotion(verdicts)
+
+    // The two criteria, side by side and named, because they were being read as
+    // one. The capture filter is what selected everything above; the rule is
+    // what would fail somebody's build.
+    console.log('\nWHICH CRITERION THE EVIDENCE BELONGS TO')
+    console.log(
+      `  capture filter (4 conditions)     ${assessment.confirmedTakedowns} removals confirmed by npm`
+    )
+    console.log(
+      `  fabricated-profile rule (5)       ${assessment.verifiedTakedowns} removals of packages the rule itself would have blocked`
+    )
+    if (assessment.unverifiableTakedowns > 0) {
+      console.log(
+        `  ${assessment.unverifiableTakedowns} of those removals can never be attributed to the rule: their snapshots carry\n` +
+        `  no weekly download count, and npm serves one complete week at a time.`
+      )
+    }
+    console.log(
+      `  false positives                   ${assessment.confirmedFalsePositives} confirmed, ` +
+      `${assessment.emergingFalsePositives} already alive with >=${wl.REAL_USAGE_DOWNLOADS} weekly downloads ` +
+      `before ${wl.VERDICT_AFTER_DAYS} days`
+    )
+
+    // Whether the gap is closing or standing still. The criterion can only ever
+    // be met by captures taken from here on, so a collector that is not
+    // recording the count is not accumulating evidence — it is accumulating
+    // captures that will be as unverifiable in a month as they are today.
+    const inClass = corpus.samples.filter(s => s.captureReason === wl.QUARANTINE_CAPTURE_REASON)
+    const withCount = inClass.filter(s => s.weeklyDownloads !== undefined).length
+    const newest = inClass.map(s => s.capturedAt).sort().pop()
+    if (inClass.length > 0 && withCount === 0) {
+      console.log(
+        `\nTHE EVIDENCE GAP IS NOT CLOSING: 0 of ${inClass.length} quarantine captures carry a download\n` +
+        `count, including the most recent (${newest?.slice(0, 19) ?? 'unknown'}). The collector records it only if it is\n` +
+        `running a build that includes that code. Restart the watcher, then check this line again:\n` +
+        `until it moves, every new capture is another record the rule can never be tested against.`
+      )
+    } else if (inClass.length > 0) {
+      console.log(
+        `\n${withCount} of ${inClass.length} quarantine captures carry a download count and can be re-judged by the rule.`
+      )
+    }
+
     console.log(`\n${assessment.statement}`)
 
     const review = wl.scheduledReview(
@@ -653,7 +789,9 @@ async function main(): Promise<void> {
     console.log(`\n${review.verdict}`)
     console.log(
       `\nThe criterion lives in watchlist.ts, not in anyone's head: ` +
-      `>=${wl.PROMOTION_MIN_TAKEDOWNS} removals and <=${wl.PROMOTION_MAX_FALSE_POSITIVES} false positives.\n`
+      `>=${wl.PROMOTION_MIN_TAKEDOWNS} removals the rule\nitself would have caused, and ` +
+      `<=${wl.PROMOTION_MAX_FALSE_POSITIVES} false positives counting the ones already visible\n` +
+      `but not yet ${wl.VERDICT_AFTER_DAYS} days old.\n`
     )
     return
   }
@@ -785,15 +923,18 @@ OPTIONS
 
   --block-fabricated-profile
       Block the conjunction: no genome, name under 7 days old, under 100KB, no
-      repository, zero downloads. ON BY DEFAULT since 2026-08-14 — this flag is
-      accepted so existing invocations keep working and now asks for what it
-      already gets. Four packages matching it were removed by npm within seven
-      hours of publication, no confirmed false positives, and 0 of 500 in
-      fp-bench's download-ranked sample can match it.
+      repository, zero downloads. OPT-IN. It was on by default between
+      2026-08-14 and 2026-08-16, on three things that each looked like a
+      measurement: removals that were selected by the capture filter and not by
+      this rule, a zero false-positive count that was the 30-day clock rather
+      than the rule, and a 0-of-500 from a download-ranked sample that cannot
+      contain a package this rule could fire on. See types.ts, and
+      norte-guard track for where the criterion currently stands.
 
   --no-block-fabricated-profile
-      Turn it back off. The rule blocks a package the developer asked for by
-      name, so refusing it is a legitimate policy; approving one package with
+      Accepted so invocations written while it was on by default keep working.
+      The rule blocks a package the developer asked for by name, so refusing it
+      is a legitimate policy; approving one package with
       norte-guard approve <pkg> --reason= is the narrower alternative.
 
   --capture-budget=<n>

@@ -872,6 +872,7 @@ export function buildArtifact(input: {
     decile: r.decile,
     gate: { verdict: r.gate.verdict, score: r.gate.score, regime: r.gate.regime, signals: r.gate.signals },
     audit: { verdict: r.audit.verdict, score: r.audit.score, regime: r.audit.regime, signals: r.audit.signals },
+    fabricatedProfile: r.fabricatedProfile,
     error: r.error,
   }))
 

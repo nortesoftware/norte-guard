@@ -55,31 +55,62 @@ Full reference: [docs/commands.md](docs/commands.md).
 
 ## Numbers
 
-Measured 2026-08-12, engine v0.3.2, over a stratified sample of 500 packages
+Measured 2026-08-16, engine v1.1.0, over a stratified sample of 500 packages
 drawn from the registry by weekly downloads.
 
 | | rate | 95% Wilson CI |
 |---|---|---|
-| non-PASS in gate mode (BLOCK + WARN) | 0.20% | 0.04%-1.12% |
-| BLOCK, the only verdict that fails a build | 0.00% | 0.00%-0.76% |
-| unevaluated (`INSUFFICIENT_HISTORY`, exit 0) | 24.60% | 21.03%-28.56% |
+| non-PASS in gate mode (BLOCK + WARN) | 0.60% | 0.20%-1.75% |
+| BLOCK, the only verdict that fails a build | 0.20% | 0.04%-1.12% |
+| unevaluated (`INSUFFICIENT_HISTORY`, exit 0) | 22.20% | 18.78%-26.05% |
 
-**Recall is not calculable.** The corpus holds zero confirmed_malicious samples
-with an artifact behind them, and "not calculable" is not "0%": one says the
-detector caught nothing, the other says nothing has been put in front of it.
+The previous figure here, 0.20% non-PASS, was measured on v0.3.2 and stayed after
+the engine moved on. `bench` now refuses to print a saved rate without declaring
+how far the run is from the engine quoting it.
 
-What is measured is **field recall**, over packages npm removed after this
-collector had already scored them:
+**This sample says nothing about the fabricated-profile rule.** It is ranked by
+weekly downloads, and that rule fires only on a name under seven days old with
+zero of them: 0 of the 500 packages met either condition, so its 0% here bounds
+nothing. Measuring it needs a sample of legitimate brand-new packages.
+
+**Recall is 0 of 8**, and the reason is not that the detector looked and failed.
+The fabricated-profile rule is opt-in and was off for the run, so every sample of
+its class counts as a miss. Switching it on would not raise the number either:
+the snapshots were taken before the collector recorded the weekly download count,
+npm serves one complete week at a time, and that week has closed — so the rule
+declines to judge them.
+
+**Field recall** is reported as two numbers that must never be merged, over
+packages npm removed after this collector had already scored them:
 
 | | |
 |---|---|
-| packages removed by npm | 73 |
-| observed before removal | 4 (5.48%, CI 2.15%-13.26%) |
-| with a score recorded at publication | 2 |
-| blocked by the gate | **0 of 2** |
+| packages removed by npm | 241 |
+| observed before removal | 12 (4.98%, CI 2.87%-8.50%) |
+| with a score recorded at publication | 9 |
+| blocked at the time, by the engine running that day | **0 of 9** |
+| blocked now, by the engine in this build | **not calculable**: 7 unjudgeable, 2 with no snapshot |
 
-Two cases is not an estimate. It is two cases, and both were the class the tool
-does not cover. Method and caveats: [docs/benchmark.md](docs/benchmark.md).
+The first number grades a decision that was made; the second grades this build.
+Reporting only the first read as a verdict on the shipped engine, and it was a
+verdict on a log format — the collector records one audit verdict per
+publication and never passes a download count into the scorer, so no rule that
+needs one could ever appear in it.
+
+**Precision of the capture filter**, which is what fills the corpus and is not
+the rule that fails builds:
+
+| | |
+|---|---|
+| packages marked | 1,509 (in 2,329 captures) |
+| removed by npm | 8 |
+| precision | 0.53% (CI 0.27%-1.04%) |
+| oldest marked | 3.2 days |
+
+No marked package has reached the 30 days at which a false positive is defined,
+so that 0.53% counts every hit and almost no miss: it is an upper bound. Of the
+19 marked packages the tracker has queried, 4 are alive with ≥10 weekly
+downloads. Method and caveats: [docs/benchmark.md](docs/benchmark.md).
 
 ## How it works
 

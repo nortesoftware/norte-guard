@@ -26,6 +26,7 @@ import { createNgpack, writeCaptureMetadata, labelCapture, type CaptureCompositi
 import { NPM_SECURITY_HOLDER } from './takedown.js'
 import { fetchWeeklyDownloadsWindow } from './downloads.js'
 import { classifyPublication, compactMarkers, YOUNG_NAME_DAYS, TINY_PACKAGE_BYTES, type ClassMarkers } from './observed-class.js'
+import { windowCovers } from './fabricated-profile.js'
 import { rotateLogs } from './log-rotation.js'
 import { storeStats } from './object-store.js'
 import { PlatformFamilyTracker } from './platform-family.js'
@@ -601,6 +602,16 @@ async function analyzePackage(
           label: 'unconfirmed',
           weeklyDownloads: counted ? counted.downloads : (markers.inClass ? null : undefined),
           downloadWindowEnd: counted?.end ?? undefined,
+          // Recorded now because it cannot be recomputed later: it needs both
+          // the packument and the week npm reported on, and the second is gone
+          // within days. False for a 404 — there is no window to overlap, and a
+          // zero with no window is what npm says about a name it has never heard
+          // of, which is what it says about most of this class.
+          downloadWindowCovers: markers.inClass
+            ? (counted && !counted.synthesizedFrom404
+                ? windowCovers(packument, counted.end, now)
+                : false)
+            : undefined,
           // Which engine selected a sample is part of the sample: a corpus
           // collected by a detector with a known bug is a draw from what that
           // bug flagged, and a benchmark cannot correct for what it cannot see.

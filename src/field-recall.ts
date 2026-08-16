@@ -222,8 +222,18 @@ export function computeFieldRecall(
       regime: row?.regime ?? null,
       auditVerdict,
       auditBlocked: auditVerdict === 'BLOCK',
-      // The gate never blocks a package it has no baseline for, and it is the
-      // gate that decides whether CI stops.
+      // Derived, not recorded: the collector logs one audit verdict and the gate
+      // verdict has to be reconstructed from it. The reconstruction is that the
+      // gate blocks where audit blocks and a baseline existed.
+      //
+      // That reconstruction cannot see the fabricated-profile rule, and no
+      // amount of care would let it. The collector scores with
+      // DEFAULT_THRESHOLDS.audit and never passes a download count into the
+      // scorer, so the conjunction has never been able to fire on this path —
+      // which is why every no-genome row in the log reads as not blocked
+      // whatever the rule does. A zero out of this number is a fact about the
+      // log format, not about the engine, and `regradeWithCurrentEngine` below
+      // exists because that distinction is the whole measurement.
       gateBlocked: auditVerdict === 'BLOCK' && row?.regime === 'genome',
     }
   })
@@ -255,15 +265,189 @@ export function computeFieldRecall(
     auditRecall: rateWithCI(auditHits, scored.length),
     gateRecall: rateWithCI(gateHits, scored.length),
     calculable: true,
-    statement: `${gateHits}/${scored.length} blocked by the gate, ${auditHits}/${scored.length} by audit`,
+    // Both columns, and when every sample is no-genome, the fact that neither
+    // could have been anything but zero. The gate column is reconstructed as
+    // "BLOCK and a baseline existed", which no-genome fails by definition; the
+    // audit column looks independent and is not, because under that regime the
+    // scorer returns WARN or PASS on absolute risk and reaches BLOCK only
+    // through the fabricated-profile conjunction, which the collector never
+    // gives a download count to. Fixing the first and leaving the second
+    // standing would move the defect one column right.
+    statement: `${gateHits}/${scored.length} blocked by the gate, ${auditHits}/${scored.length} by audit` +
+      (scored.every(s => s.regime === 'no-genome')
+        ? ` - every sample is no-genome, where neither column can be non-zero: the gate needs a ` +
+          `baseline and audit reaches BLOCK only through a rule the collector never feeds`
+        : ''),
     evidence,
   }
+}
+
+// The other half of field recall, and the half the log cannot answer.
+//
+// `computeFieldRecall` grades the decision the collector made at the time, which
+// is the only honest answer to "was this caught when it happened". It is not an
+// answer to "would this be caught now", and the two were being read as one
+// number: the log line was written by whatever engine was running that day,
+// under a rule that did not exist yet, and no re-reading of it will ever show a
+// rule that came later.
+//
+// So the second number is computed rather than read. Each sample is re-run
+// through the engine in this build, against the .ngpack captured at the time and
+// dated to the capture, so what changes between the two numbers is the engine
+// and nothing else.
+//
+// A sample the rule cannot judge — no download count in the snapshot — is
+// neither a hit nor a miss and is held out of the fraction, for the same reason
+// bench holds it out of recall: a rule that declined to apply is not a rule that
+// was wrong.
+export interface RegradedSample {
+  package: string
+  version: string
+  historicalScore: number | null
+  historicalVerdict: string | null
+  historicalGateBlocked: boolean
+  currentVerdict: string | null
+  currentScore: number | null
+  blocked: boolean
+  unevaluable: boolean
+  detail: string
+}
+
+export interface CurrentEngineRecall {
+  mode: 'gate' | 'audit'
+  // The config the re-grade ran under, spelled out. The rule is opt-in, and the
+  // question this number answers is what turning it on would buy — so it is run
+  // with the rule on and says so, rather than reporting a shipped default that
+  // cannot block and calling it a recall.
+  ruleEnabled: boolean
+  samples: RegradedSample[]
+  // Samples with a snapshot the rule could actually be applied to.
+  graded: number
+  blocked: number
+  unevaluable: number
+  noSnapshot: number
+  recall: RateWithCI | null
+  statement: string
+}
+
+const UNVERIFIED_SIGNAL = 'fabricated_profile_unverified'
+
+export async function regradeWithCurrentEngine(
+  samples: FieldSample[],
+  captures: CorpusSample[],
+  mode: 'gate' | 'audit' = 'gate',
+  // Defaults to the shipped thresholds with the conjunction switched ON. The
+  // rule is opt-in, so the default config could never block any of these and the
+  // number would be a tautology; what the promotion decision needs to know is
+  // what the rule would do if it were on.
+  ruleEnabled = true
+): Promise<CurrentEngineRecall> {
+  // Imported here rather than at the top: field-recall is loaded by bench for
+  // its types alone in some paths, and inspect pulls in the whole scorer.
+  const { inspect } = await import('./inspect.js')
+  const { NgpackSource } = await import('./ngpack.js')
+  const { DEFAULT_THRESHOLDS } = await import('./types.js')
+  const config = { ...DEFAULT_THRESHOLDS[mode], blockFabricatedProfile: ruleEnabled }
+
+  const out: RegradedSample[] = []
+
+  for (const s of samples) {
+    const base = {
+      package: s.package,
+      version: s.version,
+      historicalScore: s.score,
+      historicalVerdict: s.auditVerdict,
+      historicalGateBlocked: s.gateBlocked,
+    }
+
+    const snapshot = snapshotFor(s.package, s.version, captures)
+    if (!snapshot) {
+      out.push({
+        ...base,
+        currentVerdict: null, currentScore: null,
+        blocked: false, unevaluable: false,
+        detail: 'no .ngpack on disk: the current engine has nothing to re-read',
+      })
+      continue
+    }
+
+    try {
+      const result = await inspect(`${s.package}@${snapshot.version}`, {
+        mode,
+        config,
+        source: new NgpackSource(snapshot.ngpackPath),
+      })
+      const unevaluable = result.signals.some(sig => sig.type === UNVERIFIED_SIGNAL)
+
+      out.push({
+        ...base,
+        currentVerdict: result.verdict,
+        currentScore: result.totalScore,
+        blocked: result.verdict === 'BLOCK',
+        unevaluable,
+        detail: unevaluable
+          ? 'the conjunction needs a download count and the snapshot carries none'
+          : `${result.verdict} at score ${result.totalScore}, regime ${result.regime}`,
+      })
+    } catch (e) {
+      // An unreadable snapshot is a corpus defect and must not be scored as a
+      // miss, for the same reason bench separates unreadable from missed.
+      out.push({
+        ...base,
+        currentVerdict: null, currentScore: null,
+        blocked: false, unevaluable: false,
+        detail: `snapshot unreadable: ${e}`,
+      })
+    }
+  }
+
+  const noSnapshot = out.filter(r => r.currentVerdict === null).length
+  const unevaluable = out.filter(r => r.unevaluable).length
+  const graded = out.length - noSnapshot - unevaluable
+  const blocked = out.filter(r => r.blocked).length
+
+  return {
+    mode,
+    ruleEnabled,
+    samples: out,
+    graded,
+    blocked,
+    unevaluable,
+    noSnapshot,
+    recall: graded > 0 ? rateWithCI(blocked, graded) : null,
+    statement: graded > 0
+      ? `${blocked}/${graded} blocked by the engine running now` +
+        (ruleEnabled ? ', with the fabricated-profile rule switched on' : '')
+      : `not calculable: ${out.length} samples, ${unevaluable} the rule cannot judge, ` +
+        `${noSnapshot} with no snapshot to re-read`,
+  }
+}
+
+// The snapshot that holds the version the removal was about, when there is one.
+// Contaminated captures are excluded here as everywhere: a benchmark that admits
+// them in one place and refuses them in another reports two different corpora
+// under one name.
+function snapshotFor(
+  pkg: string,
+  version: string,
+  captures: CorpusSample[]
+): CorpusSample | null {
+  const usable = captures.filter(
+    s => s.package === pkg && !s.contaminated && s.version !== NPM_SECURITY_HOLDER
+  )
+  return usable.find(s => s.version === version)
+    ?? usable.sort((a, b) => a.capturedAt.localeCompare(b.capturedAt))[0]
+    ?? null
 }
 
 // Every takedown the watcher saw as it happened, including the rotated days.
 // This is the source that keeps up: it is written the moment npm's marker
 // appears on the feed, while the sweep only knows what it knew when it ran.
-function readLiveTakedowns(outputDir: string): Set<string> {
+//
+// Exported because the precision denominator needs the same set: what fraction
+// of the packages the filter marked npm went on to remove is the same question
+// as which of them are in here, and two readers of one log must not drift.
+export function readLiveTakedowns(outputDir: string): Set<string> {
   const packages = new Set<string>()
   if (!existsSync(outputDir)) return packages
 

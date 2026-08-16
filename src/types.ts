@@ -104,22 +104,38 @@ export interface ThresholdConfig {
   // The only rule that can block a package with no history, and it does so on a
   // conjunction rather than on a score. See fabricated-profile.ts.
   //
-  // On by default since 2026-08-14. It was opt-in while the false-positive cost
-  // was unmeasured and no confirmed removal stood behind it; both of those
-  // changed on the same day:
+  // Opt-in. It went on by default on 2026-08-14 and came back off on 2026-08-16,
+  // and the three things that were taken for evidence are worth keeping written
+  // down, because each of them looked like a measurement and none of them was:
   //
-  //   4 confirmed removals. async-critical-section@1.0.0, keyed-mutex-map@2.1.2,
-  //   resource-lease-pool@1.4.2 and try-lock-runner@3.2.1 were quarantined at
-  //   publication with all four free conditions holding, and npm published
-  //   0.0.1-security over every one of them seven hours later. The criterion in
-  //   watchlist.ts asks for three.
+  //   "4 confirmed removals." npm did publish 0.0.1-security over
+  //   async-critical-section@1.0.0, keyed-mutex-map@2.1.2, resource-lease-pool@1.4.2
+  //   and try-lock-runner@3.2.1 — eight of them by now. But they were selected by
+  //   the capture filter, which is four conditions, and this rule is five. Not one
+  //   of their snapshots carries the weekly download count, so what this rule
+  //   would have done with them cannot be established, then or ever: npm serves
+  //   one complete week at a time and those weeks have closed. Two criteria were
+  //   sharing the name "the four free conditions" and the evidence for one was
+  //   being counted for the other.
   //
-  //   0 confirmed false positives, against a ceiling of one.
+  //   "0 confirmed false positives, against a ceiling of one." A false positive
+  //   is defined as thirty days alive and installed by somebody, and the first
+  //   capture was three days old. The zero was the calendar, not the rule. Five
+  //   marked packages are already alive with 56 to 332 weekly downloads, and
+  //   re-running six of them from their snapshots with the count forced to zero
+  //   returns BLOCK on every one: the rule as written would have failed builds
+  //   over packages people install.
   //
-  //   0 of 500 in fp-bench's stratified sample could match: the conjunction
-  //   needs zero weekly downloads and every package in that sample has some.
-  //   The sample is drawn by download rank, which is what a dependency in a real
-  //   lockfile looks like.
+  //   "0 of 500 in fp-bench's stratified sample could match." True, and it bounds
+  //   nothing. That sample is ranked by weekly downloads and the rule needs a name
+  //   under seven days old with none: in the 2026-08-16 run, 0 of 500 packages met
+  //   either condition. A sample with no candidate in it cannot report a rate for
+  //   the rule, and its 0% was being read as one.
+  //
+  // What would settle it: quarantine captures taken with the download count
+  // recorded, aged past the thirty days, with removals outnumbering the packages
+  // that turn out to be ordinary. The collector writes the count now; nothing on
+  // disk predates that, so the clock starts at the first capture that carries it.
   //
   // What it costs is 2.65% of the raw publish stream (1,116 of 42,164 scored
   // publications) — but that is the stream, not anybody's dependencies. This
@@ -131,6 +147,6 @@ export interface ThresholdConfig {
 // Gate blocks late to keep CI usable; audit blocks early because a human
 // is already reading the output.
 export const DEFAULT_THRESHOLDS: Record<'gate' | 'audit', ThresholdConfig> = {
-  gate:  { mode: 'gate',  blockScore: 70, blockFabricatedProfile: true },
-  audit: { mode: 'audit', blockScore: 40, blockFabricatedProfile: true },
+  gate:  { mode: 'gate',  blockScore: 70, blockFabricatedProfile: false },
+  audit: { mode: 'audit', blockScore: 40, blockFabricatedProfile: false },
 }

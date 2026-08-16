@@ -21,6 +21,15 @@ export interface FpBenchPackageResult {
   decile?: number
   gate: ModeResult
   audit: ModeResult
+  // The conjunction, evaluated on every package whether or not the rule was
+  // switched on. Kept in the artifact rather than only printed: a run saved
+  // before the rule went default-on cannot be told apart from one saved after
+  // unless the file carries both the config it ran under and what the rule saw.
+  fabricatedProfile?: {
+    matches: boolean
+    localConjuncts: boolean
+    conjuncts: Record<string, boolean>
+  }
   error?: string
 }
 
@@ -148,9 +157,11 @@ export function loadArtifacts(dir = FP_BENCH_RESULTS_DIR): LoadedArtifact[] {
   return loaded.sort((a, b) => b.artifact.generatedAt.localeCompare(a.artifact.generatedAt))
 }
 
-export function loadLatestArtifact(dir = FP_BENCH_RESULTS_DIR): LoadedArtifact | null {
-  return loadArtifacts(dir)[0] ?? null
-}
+// There was a loadLatestArtifact() here and its removal is the point. "Newest
+// wins" is a selection rule that cannot see whether the run it picks measured
+// the engine asking, and it picked an ablation run saved an hour after the one
+// that matched. Callers take the sorted list and choose on the config they need;
+// bench.ts does exactly that.
 
 // In the artifact rather than only printed, so the caveat cannot be dropped when
 // the number is quoted elsewhere.

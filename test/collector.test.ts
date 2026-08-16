@@ -25,7 +25,12 @@ import { absoluteRiskSignals, impliedHistory } from '../src/absolute-risk.js'
 import { putObject, getObject, objectPath } from '../src/object-store.js'
 import { rotateLogs } from '../src/log-rotation.js'
 import { createApprovalRecord, createOverrideApproval } from '../src/approvals.js'
-import { assessPromotion, scheduledReview, type TrackedVerdict, type TrackedStatus } from '../src/watchlist.js'
+import {
+  assessPromotion, scheduledReview, ruleEvidenceFor, verdictsFromCaptures,
+  QUARANTINE_CAPTURE_REASON, REAL_USAGE_DOWNLOADS, VERDICT_AFTER_DAYS,
+  type TrackedVerdict, type TrackedStatus, type ClassCapture,
+} from '../src/watchlist.js'
+import { classPrecision, type CorpusSample } from '../src/corpus.js'
 import { fabricatedProfile, matchesLocalConjuncts } from '../src/fabricated-profile.js'
 import { scoreWithRegime } from '../src/scorer.js'
 import { buildGenomeFromPackument } from '../src/genome.js'
@@ -837,11 +842,13 @@ describe('fabricatedProfile: a conjunction, not a score', () => {
     expect(matchesLocalConjuncts({ packument: pBig, currentMeta: mBig, regime: 'no-genome' })).toBe(false)
   })
 
-  // It was opt-in until 2026-08-14, when four packages matching it were removed
-  // by npm within seven hours of publication and the criterion in watchlist.ts
-  // was met. This asserts the current policy in both directions, so flipping it
-  // again stays a decision rather than a diff nobody notices.
-  it('it is ON by default: the conjunction blocks, and --no- turns it back off', () => {
+  // It was ON by default between 2026-08-14 and 2026-08-16, on four removals
+  // that turned out to be evidence about the capture filter rather than about
+  // this rule — the two share four conditions and this one needs a fifth that no
+  // capture on disk records. types.ts carries the full account. This asserts the
+  // current policy in both directions, so flipping it again stays a decision
+  // rather than a diff nobody notices.
+  it('it is OFF by default: the conjunction is recorded and does not block', () => {
     const [p, m] = candidate()
     const genome = buildGenomeFromPackument('p', p)
 
@@ -849,17 +856,18 @@ describe('fabricatedProfile: a conjunction, not a score', () => {
       packument: p, version: m.version, currentMeta: m, genome,
       weeklyDownloads: 0, config: DEFAULT_THRESHOLDS.gate,
     })
-    expect(byDefault.verdict).toBe('BLOCK')
-    expect(exitCodeForVerdict(byDefault.verdict)).toBe(1)
+    expect(byDefault.verdict).toBe('INSUFFICIENT_HISTORY')
+    expect(exitCodeForVerdict(byDefault.verdict)).toBe(0)
     // The signal is recorded whether or not it blocks, so it can be measured.
     expect(byDefault.signals.some(s => s.type === 'fabricated_package_profile')).toBe(true)
 
-    const disabled = scoreWithRegime({
+    const enabled = scoreWithRegime({
       packument: p, version: m.version, currentMeta: m, genome,
-      weeklyDownloads: 0, config: { ...DEFAULT_THRESHOLDS.gate, blockFabricatedProfile: false },
+      weeklyDownloads: 0, config: { ...DEFAULT_THRESHOLDS.gate, blockFabricatedProfile: true },
     })
-    expect(disabled.verdict).toBe('INSUFFICIENT_HISTORY')
-    expect(disabled.signals.some(s => s.type === 'fabricated_package_profile')).toBe(true)
+    expect(enabled.verdict).toBe('BLOCK')
+    expect(exitCodeForVerdict(enabled.verdict)).toBe(1)
+    expect(enabled.signals.some(s => s.type === 'fabricated_package_profile')).toBe(true)
   })
 
   // Four of the five conditions are free, and they are the ones the prevalence
@@ -1013,8 +1021,16 @@ describe('escape hatch: approving a blocked package', () => {
 })
 
 describe('promotion criterion and dated review', () => {
-  const v = (status: TrackedStatus): TrackedVerdict =>
-    ({ package: 'p', addedAt: '2026-08-12T00:00:00Z', daysTracked: 30, status, lastDownloads: 0, detail: '' })
+  // 'rule-matched' by default: these tests are about counting, and the evidence
+  // dimension has its own block below.
+  const v = (
+    status: TrackedStatus,
+    over: Partial<TrackedVerdict> = {}
+  ): TrackedVerdict =>
+    ({
+      package: 'p', addedAt: '2026-08-12T00:00:00Z', daysTracked: 30, status,
+      lastDownloads: 0, ruleEvidence: 'rule-matched', detail: '', ...over,
+    })
 
   it('does not promote without the three removals', () => {
     expect(assessPromotion([v('confirmed-takedown'), v('confirmed-takedown')]).promotable).toBe(false)
@@ -1027,6 +1043,81 @@ describe('promotion criterion and dated review', () => {
     expect(assessPromotion([...tres, v('confirmed-false-positive'), v('confirmed-false-positive')]).promotable).toBe(false)
   })
 
+  // The bug this criterion shipped with: `track` reported PROMOTABLE on eight
+  // removals of packages the rule was never shown to match, because the capture
+  // filter and the rule were both called "the four free conditions".
+  it('a removal the rule cannot be shown to have caused does not promote it', () => {
+    const unverifiable = [
+      v('confirmed-takedown', { ruleEvidence: 'unverifiable' }),
+      v('confirmed-takedown', { ruleEvidence: 'unverifiable' }),
+      v('confirmed-takedown', { ruleEvidence: 'unverifiable' }),
+    ]
+    const a = assessPromotion(unverifiable)
+
+    expect(a.confirmedTakedowns).toBe(3)
+    expect(a.verifiedTakedowns).toBe(0)
+    expect(a.unverifiableTakedowns).toBe(3)
+    expect(a.promotable).toBe(false)
+    expect(a.statement).toContain('STAYS OPT-IN')
+  })
+
+  it('a removal of something the rule would have cleared is not evidence for it', () => {
+    const a = assessPromotion([
+      v('confirmed-takedown', { ruleEvidence: 'rule-cleared' }),
+      v('confirmed-takedown', { ruleEvidence: 'rule-cleared' }),
+      v('confirmed-takedown', { ruleEvidence: 'rule-cleared' }),
+    ])
+    expect(a.verifiedTakedowns).toBe(0)
+    expect(a.unverifiableTakedowns).toBe(0)
+    expect(a.promotable).toBe(false)
+  })
+
+  // Removals settle in hours, false positives at thirty days. Counting only what
+  // has settled makes the criterion say PROMOTABLE on day three for any rule.
+  it('a package already installed by somebody counts before its thirty days are up', () => {
+    const tres = [v('confirmed-takedown'), v('confirmed-takedown'), v('confirmed-takedown')]
+    const emerging = (dl: number) =>
+      v('pending', { daysTracked: 3, lastDownloads: dl })
+
+    expect(assessPromotion([...tres, emerging(0)]).promotable).toBe(true)
+    expect(assessPromotion([...tres, emerging(9)]).promotable).toBe(true)
+
+    const two = assessPromotion([...tres, emerging(50), emerging(300)])
+    expect(two.emergingFalsePositives).toBe(2)
+    expect(two.promotable).toBe(false)
+    expect(two.blockers.join(' ')).toContain('before their 30 days are up')
+  })
+
+  it('both blockers are reported, not only the first', () => {
+    const a = assessPromotion([
+      v('confirmed-takedown', { ruleEvidence: 'unverifiable' }),
+      v('pending', { daysTracked: 3, lastDownloads: 100 }),
+      v('pending', { daysTracked: 3, lastDownloads: 100 }),
+    ])
+    expect(a.blockers).toHaveLength(2)
+  })
+
+  it('zero downloads and unknown downloads are different answers', () => {
+    expect(ruleEvidenceFor(0, true)).toBe('rule-matched')
+    expect(ruleEvidenceFor(1, true)).toBe('rule-cleared')
+    expect(ruleEvidenceFor(null, true)).toBe('unverifiable')
+    expect(ruleEvidenceFor(undefined, undefined)).toBe('unverifiable')
+  })
+
+  // npm answers 404 for a package published minutes ago, downloads.ts reads that
+  // as zero because for a verdict it is one, and this class is made of packages
+  // published minutes ago. Grading that zero as a match would let a restarted
+  // collector clear PROMOTION_MIN_TAKEDOWNS out of three 404s inside a day.
+  it('a zero over a week the package did not exist in is not evidence', () => {
+    expect(ruleEvidenceFor(0, false)).toBe('vacuous-zero')
+    expect(ruleEvidenceFor(0, null)).toBe('vacuous-zero')
+    // Absent means the capture predates the field. A build-failing rule does not
+    // get the benefit of the doubt from a record that cannot give it.
+    expect(ruleEvidenceFor(0, undefined)).toBe('vacuous-zero')
+    // A non-zero count is a real observation whatever the window did.
+    expect(ruleEvidenceFor(7, false)).toBe('rule-cleared')
+  })
+
   it('a dated review turns waiting into a result', () => {
     const antes = scheduledReview(500, 0, new Date('2026-08-20T00:00:00Z'))
     expect(antes.due).toBe(false)
@@ -1036,5 +1127,261 @@ describe('promotion criterion and dated review', () => {
     const vencida = scheduledReview(1500, 1, new Date('2026-08-27T00:00:00Z'))
     expect(vencida.due).toBe(true)
     expect(vencida.verdict).toContain('IT IS A RESULT')
+  })
+})
+
+// The contradiction this suite exists to keep from coming back: `track` reported
+// "8 confirmed removals, PROMOTABLE" while `bench` reported the same eight as
+// unjudgeable. Both were right about their own criterion and neither said which
+// criterion it was.
+describe('the capture filter and the rule are different criteria', () => {
+  const capture = (over: Partial<ClassCapture> = {}): ClassCapture => ({
+    package: 'p',
+    version: '1.0.0',
+    capturedAt: '2026-08-13T00:00:00Z',
+    label: 'confirmed_malicious',
+    labelSource: 'npm-takedown: 0.0.1-security',
+    captureReason: QUARANTINE_CAPTURE_REASON,
+    contaminated: false,
+    ...over,
+  })
+
+  it('a capture with no recorded count cannot say what the rule would have done', () => {
+    const [v] = verdictsFromCaptures([capture()])
+    expect(v!.status).toBe('confirmed-takedown')
+    expect(v!.ruleEvidence).toBe('unverifiable')
+    expect(v!.detail).toContain('capture filter (4 conditions)')
+    expect(v!.detail).toContain('unknowable')
+  })
+
+  it('a recorded zero over a covered week is the fifth conjunct', () => {
+    const [v] = verdictsFromCaptures([
+      capture({ weeklyDownloads: 0, downloadWindowCovers: true }),
+    ])
+    expect(v!.ruleEvidence).toBe('rule-matched')
+    expect(v!.detail).toContain('would have blocked it')
+  })
+
+  it('a recorded zero over a week that closed first promotes nothing', () => {
+    const [v] = verdictsFromCaptures([
+      capture({ weeklyDownloads: 0, downloadWindowCovers: false }),
+    ])
+    expect(v!.status).toBe('confirmed-takedown')
+    expect(v!.ruleEvidence).toBe('vacuous-zero')
+    expect(v!.detail).toContain('holds vacuously')
+
+    const a = assessPromotion(verdictsFromCaptures(
+      Array.from({ length: 5 }, (_, i) =>
+        capture({ package: `p${i}`, weeklyDownloads: 0, downloadWindowCovers: false }))
+    ))
+    expect(a.confirmedTakedowns).toBe(5)
+    expect(a.verifiedTakedowns).toBe(0)
+    expect(a.vacuousTakedowns).toBe(5)
+    expect(a.promotable).toBe(false)
+    expect(a.blockers.join(' ')).toContain('arithmetic')
+  })
+
+  it('a recorded non-zero says the rule would not have fired, removal or not', () => {
+    const [v] = verdictsFromCaptures([capture({ weeklyDownloads: 40 })])
+    expect(v!.status).toBe('confirmed-takedown')
+    expect(v!.ruleEvidence).toBe('rule-cleared')
+    expect(v!.detail).toContain('would NOT have blocked it')
+  })
+
+  it('one verdict per package, however many times it was captured', () => {
+    const v = verdictsFromCaptures([
+      capture({ version: '1.0.0' }),
+      capture({ version: '1.0.1' }),
+    ])
+    expect(v).toHaveLength(1)
+  })
+
+  it('eight unverifiable removals do not promote the rule', () => {
+    const eight = Array.from({ length: 8 }, (_, i) => capture({ package: `p${i}` }))
+    const a = assessPromotion(verdictsFromCaptures(eight))
+
+    expect(a.confirmedTakedowns).toBe(8)
+    expect(a.verifiedTakedowns).toBe(0)
+    expect(a.promotable).toBe(false)
+  })
+})
+
+describe('precision of the capture filter', () => {
+  const NOW = new Date('2026-08-16T00:00:00Z').getTime()
+  const day = 86_400_000
+
+  const sample = (over: Partial<CorpusSample>): CorpusSample => ({
+    package: 'p', version: '1.0.0', label: 'unconfirmed',
+    ngpackPath: '/dev/null', capturedAt: new Date(NOW - day).toISOString(),
+    hasTarball: true, labelAssumed: false,
+    captureReason: QUARANTINE_CAPTURE_REASON, contaminated: false,
+    ...over,
+  })
+
+  const run = (samples: CorpusSample[], removed: string[], downloads?: Map<string, number>) =>
+    classPrecision({
+      samples,
+      captureReason: QUARANTINE_CAPTURE_REASON,
+      removedPackages: new Set(removed),
+      observedDownloads: downloads,
+      realUsageDownloads: REAL_USAGE_DOWNLOADS,
+      matureDays: VERDICT_AFTER_DAYS,
+      now: NOW,
+    })
+
+  it('counts packages, not captures: republishing must not inflate the denominator', () => {
+    const p = run([
+      sample({ package: 'a', version: '1.0.0' }),
+      sample({ package: 'a', version: '1.0.1' }),
+      sample({ package: 'a', version: '1.0.2' }),
+      sample({ package: 'b' }),
+    ], ['a'])
+
+    expect(p.markedCaptures).toBe(4)
+    expect(p.markedPackages).toBe(2)
+    expect(p.precision!.rate).toBeCloseTo(0.5)
+  })
+
+  it('captures from other reasons never enter the denominator', () => {
+    const p = run([
+      sample({ package: 'a' }),
+      sample({ package: 'b', captureReason: 'watcher-threshold' }),
+    ], [])
+    expect(p.markedPackages).toBe(1)
+  })
+
+  // The bound runs upward, not downward. Every marked name enters the
+  // denominator when it is marked, whatever becomes of it, so the denominator is
+  // already complete for the cohort and only removals still to arrive can move
+  // the fraction. The first version of this caveat said "upper bound" and had it
+  // exactly backwards.
+  it('an immature denominator says so, and says which way the number can move', () => {
+    const p = run([sample({ package: 'a' })], [])
+    expect(p.maturePackages).toBe(0)
+    expect(p.maturePrecision).toBeNull()
+    expect(p.caveats.join(' ')).toContain('LOWER bound')
+    expect(p.caveats.join(' ')).not.toContain('upper bound')
+  })
+
+  // Retention is 7 days and a verdict takes 30, so no unconfirmed capture of
+  // this class can ever reach the age its answer needs. "Not yet" would be a
+  // caveat that never comes true.
+  it('a retention shorter than the verdict clock is named as a policy contradiction', () => {
+    const withRetention = classPrecision({
+      samples: [sample({ package: 'a' })],
+      captureReason: QUARANTINE_CAPTURE_REASON,
+      removedPackages: new Set<string>(),
+      realUsageDownloads: REAL_USAGE_DOWNLOADS,
+      matureDays: VERDICT_AFTER_DAYS,
+      retentionDays: 7,
+      now: NOW,
+    })
+    expect(withRetention.caveats.join(' ')).toContain('cannot be rebuilt from surviving captures')
+
+    // Not claimed when retention is long enough for the clock to run.
+    const generous = classPrecision({
+      samples: [sample({ package: 'a' })],
+      captureReason: QUARANTINE_CAPTURE_REASON,
+      removedPackages: new Set<string>(),
+      realUsageDownloads: REAL_USAGE_DOWNLOADS,
+      matureDays: VERDICT_AFTER_DAYS,
+      retentionDays: 45,
+      now: NOW,
+    })
+    expect(generous.caveats.join(' ')).not.toContain('cannot be rebuilt')
+  })
+
+  // Both deleters keep labelled captures and take unlabelled ones oldest-first:
+  // the numerator is protected and the denominator is not. Without the expiry
+  // log the fraction would climb on its own as the corpus aged, and the climb
+  // would be the deleter rather than the filter.
+  it('a deleted capture keeps its place in the denominator', () => {
+    const expired = [
+      { package: 'gone-1', capturedAt: new Date(NOW - 40 * day).toISOString(), captureReason: QUARANTINE_CAPTURE_REASON },
+      { package: 'gone-2', capturedAt: new Date(NOW - 40 * day).toISOString(), captureReason: QUARANTINE_CAPTURE_REASON },
+      // A different reason is a different filter and must not be folded in.
+      { package: 'other', capturedAt: new Date(NOW - 40 * day).toISOString(), captureReason: 'watcher-threshold' },
+    ]
+
+    const withLog = classPrecision({
+      samples: [sample({ package: 'a' })],
+      captureReason: QUARANTINE_CAPTURE_REASON,
+      removedPackages: new Set(['gone-1']),
+      expired,
+      realUsageDownloads: REAL_USAGE_DOWNLOADS,
+      matureDays: VERDICT_AFTER_DAYS,
+      now: NOW,
+    })
+
+    expect(withLog.markedPackages).toBe(3)     // a, gone-1, gone-2
+    expect(withLog.expiredPackages).toBe(2)
+    expect(withLog.removed).toBe(1)
+    // And they are the only ones old enough for the mature fraction to exist.
+    expect(withLog.maturePackages).toBe(2)
+    expect(withLog.matureRemoved).toBe(1)
+    expect(withLog.caveats.join(' ')).toContain('expiry log')
+  })
+
+  it('a name re-captured after its old artifact expired is counted once, from the earlier date', () => {
+    const p = classPrecision({
+      samples: [sample({ package: 'a', capturedAt: new Date(NOW - day).toISOString() })],
+      captureReason: QUARANTINE_CAPTURE_REASON,
+      removedPackages: new Set<string>(),
+      expired: [
+        { package: 'a', capturedAt: new Date(NOW - 40 * day).toISOString(), captureReason: QUARANTINE_CAPTURE_REASON },
+      ],
+      realUsageDownloads: REAL_USAGE_DOWNLOADS,
+      matureDays: VERDICT_AFTER_DAYS,
+      now: NOW,
+    })
+
+    expect(p.markedPackages).toBe(1)
+    expect(p.expiredPackages).toBe(0)
+    expect(p.maturePackages).toBe(1)   // the clock runs from the first marking
+  })
+
+  // Five lock-family names published inside four minutes and removed inside
+  // forty seconds are not five independent draws, and Wilson assumes they are.
+  it('removals arriving in campaigns are declared as not independent', () => {
+    const many = run(
+      Array.from({ length: 10 }, (_, i) => sample({ package: `p${i}` })),
+      ['p0', 'p1', 'p2']
+    )
+    expect(many.caveats.join(' ')).toContain('not 3 independent events')
+
+    const one = run([sample({ package: 'a' }), sample({ package: 'b' })], ['a'])
+    expect(one.caveats.join(' ')).not.toContain('independent events')
+  })
+
+  it('the mature fraction is computed once packages are old enough for it', () => {
+    const old = new Date(NOW - 40 * day).toISOString()
+    const p = run([
+      sample({ package: 'a', capturedAt: old }),
+      sample({ package: 'b', capturedAt: old }),
+      sample({ package: 'c' }),
+    ], ['a'])
+
+    expect(p.maturePackages).toBe(2)
+    expect(p.matureRemoved).toBe(1)
+    expect(p.maturePrecision!.rate).toBeCloseTo(0.5)
+  })
+
+  it('the clock starts at the first capture, not the last', () => {
+    const p = run([
+      sample({ package: 'a', capturedAt: new Date(NOW - 40 * day).toISOString() }),
+      sample({ package: 'a', capturedAt: new Date(NOW - day).toISOString() }),
+    ], [])
+    expect(p.maturePackages).toBe(1)
+  })
+
+  it('"alive" is measured over what was queried and never scaled to the rest', () => {
+    const p = run(
+      [sample({ package: 'a' }), sample({ package: 'b' }), sample({ package: 'c' })],
+      [],
+      new Map([['a', 300]])
+    )
+    expect(p.observedAlive).toBe(1)
+    expect(p.observedAliveWithUsage).toBe(1)
+    expect(p.caveats.join(' ')).toContain('must not be scaled up')
   })
 })

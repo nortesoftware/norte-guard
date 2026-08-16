@@ -27,13 +27,14 @@
 // thing they asked for has the profile of a package fabricated today. And
 // `norte-guard approve` is a one-line escape when they know better.
 //
-// It stopped being opt-in on 2026-08-14, on the four free conditions and npm's
-// own removals rather than on a reconstructed five-condition match: the packages
-// behind the decision were quarantined at publication with those four holding,
-// and npm removed every one of them hours later. The fifth cannot be checked
-// backwards at all — npm reports one week at a time — so nothing here claims it
-// was. The criterion that decided it is in watchlist.ts; the evidence is written
-// out in types.ts.
+// It stopped being opt-in on 2026-08-14 and went back to opt-in on 2026-08-16.
+// The decision to switch it on rested on the four free conditions and npm's own
+// removals rather than on a five-condition match, and that turned out to be the
+// whole problem: those are two different criteria, the second is the one that
+// fails builds, and no capture on disk can establish it. The fifth cannot be
+// checked backwards at all — npm reports one week at a time. The criterion that
+// decides it is in watchlist.ts; what was actually measured is written out in
+// types.ts.
 //
 // Unknown download counts never match. A gate must not block because it failed
 // to check something.
@@ -130,7 +131,12 @@ function evaluate(input: FabricatedProfileInput): FabricatedProfile {
 // npm's last-week window is the last COMPLETE week, so it lags. A name created
 // after the window closed cannot have been downloaded inside it, and its zero is
 // arithmetic rather than evidence.
-function windowCovers(
+//
+// Exported because the answer has to be recorded at capture time to survive. It
+// needs the packument, and by the time anyone asks whether a removal counts as
+// evidence for this rule, the week npm reported on is gone and the question
+// cannot be re-asked. What that grade means for promotion is in watchlist.ts.
+export function windowCovers(
   packument: Packument,
   windowEnd: string | null | undefined,
   now: number

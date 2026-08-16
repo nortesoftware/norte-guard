@@ -31,10 +31,10 @@ import {
   KNOWN_ATTACK_REFERENCES,
   PRE_FIX_REASON,
 } from '../src/corpus.js'
-import { runBench, buildRecallReport, buildFalsePositiveReport } from '../src/bench.js'
-import { computeFieldRecall } from '../src/field-recall.js'
+import { runBench, buildRecallReport, buildFalsePositiveReport, artifactStaleness, artifactBlindSpots } from '../src/bench.js'
+import { computeFieldRecall, regradeWithCurrentEngine } from '../src/field-recall.js'
 import { summarize, sampleEvenly, stratifyByDecile, buildArtifact, blockZeroAlert, BLOCK_ZERO_ALERT, type FpBenchRow } from '../src/fp-bench.js'
-import { saveArtifact, loadLatestArtifact, artifactPath, engineVersion } from '../src/fp-bench-store.js'
+import { saveArtifact, loadArtifacts, artifactPath, engineVersion, type FpBenchArtifact } from '../src/fp-bench-store.js'
 import { scoreWithRegime, score } from '../src/scorer.js'
 import { inspect } from '../src/inspect.js'
 import { NgpackSource } from '../src/ngpack.js'
@@ -535,6 +535,31 @@ describe('recall', () => {
     expect(report.conservativeValue).toBe(0.5) // contando el ilegible como fallo
     expect(report.unreadable).toBe(1)
   })
+
+  // With the rule opt-in, every sample of its class is a real miss and recall is
+  // a real 0%. That number reads as "the detector does not work" unless it says
+  // that the rule it needed was switched off — and that turning it on would not
+  // raise it either, because the snapshots cannot feed it.
+  it('a 0% measured with the rule off says so, and says what turning it on would not fix', () => {
+    const root = makeTempDir('ng-recall-ruleoff-')
+    writeCapture(root, {
+      pkg: 'fabricado', version: '1.0.0', packument: makeFabricatedPackument(),
+      metadata: { label: 'confirmed_malicious', labelSource: 'npm-takedown: 0.0.1-security' },
+    })
+
+    const results = [
+      { package: 'fabricado', version: '1.0.0', result: null, prediction: 'PASS' as const, detected: false },
+    ]
+
+    const off = buildRecallReport(loadCorpus([root]), results, false)
+    expect(off.calculable).toBe(true)
+    expect(off.value).toBe(0)
+    expect(off.detail).toContain('opt-in and was off')
+    expect(off.detail).toContain('decline to judge')
+
+    const on = buildRecallReport(loadCorpus([root]), results, true)
+    expect(on.detail).not.toContain('opt-in and was off')
+  })
 })
 
 describe('false-positive report', () => {
@@ -589,7 +614,7 @@ describe('false-positive report', () => {
 
     expect(report.source).toBe('fp-bench')
     expect(report.statement).toBe('0.40% (95% Wilson CI: 0.11%-1.45%, n=500)')
-    expect(loadLatestArtifact(dir)!.artifact.engineVersion).toBeTruthy()
+    expect(loadArtifacts(dir)[0]!.artifact.engineVersion).toBeTruthy()
   })
 
   it('separates "non-PASS" from "unevaluated": distinct categories, neither hidden', () => {
@@ -978,3 +1003,286 @@ function makeFabricatedPackument(): Packument {
     hasReadme: true,
   }
 }
+
+/**
+ * "Field recall 0/9 blocked by the gate" was produced by a formula that could
+ * not return anything else. The collector logs one audit verdict per
+ * publication, the gate verdict is reconstructed from it as "BLOCK and a genome
+ * existed", and every sample in that list is no-genome — so the fraction was
+ * fixed at zero by its own arithmetic, whatever the engine did.
+ *
+ * The fix is not a better reconstruction. It is a second number, computed by
+ * re-running each sample through the engine in this build against the snapshot
+ * it was captured from.
+ */
+describe('field recall is re-graded by the engine that is shipping', () => {
+  const sampleOf = (pkg: string, version: string) => ({
+    package: pkg,
+    version,
+    observedAt: '2026-08-12T02:46:45.791Z',
+    score: 17,
+    regime: 'no-genome' as const,
+    auditVerdict: 'PASS',
+    auditBlocked: false,
+    gateBlocked: false,
+  })
+
+  const corpusSample = (pkg: string, version: string, dir: string): CorpusSample => ({
+    package: pkg, version, label: 'confirmed_malicious', ngpackPath: dir,
+    capturedAt: '2026-08-12T02:46:45.791Z',
+    labelSource: 'npm-takedown: 0.0.1-security', hasTarball: true,
+    labelAssumed: false, contaminated: false,
+  })
+
+  it('a snapshot with no recorded count is held out of the fraction, not counted as a miss', async () => {
+    const root = makeTempDir('ng-regrade-nodl-')
+    const dir = writeCapture(root, {
+      pkg: 'fabricado', version: '1.0.0',
+      packument: makeFabricatedPackument(),
+      metadata: { label: 'unconfirmed' },
+    })
+
+    const r = await regradeWithCurrentEngine(
+      [sampleOf('fabricado', '1.0.0')],
+      [corpusSample('fabricado', '1.0.0', dir)],
+      'gate'
+    )
+
+    expect(r.unevaluable).toBe(1)
+    expect(r.graded).toBe(0)
+    expect(r.blocked).toBe(0)
+    expect(r.recall).toBeNull()
+    expect(r.statement).toContain('not calculable')
+    expect(r.samples[0]!.detail).toContain('download count')
+  })
+
+  it('the same sample with the count recorded is blocked by this engine', async () => {
+    const root = makeTempDir('ng-regrade-dl-')
+    const dir = writeCapture(root, {
+      pkg: 'fabricado', version: '1.0.0',
+      packument: makeFabricatedPackument(),
+      metadata: { label: 'unconfirmed', weeklyDownloads: 0, downloadWindowEnd: '2026-08-13' },
+    })
+
+    const r = await regradeWithCurrentEngine(
+      [sampleOf('fabricado', '1.0.0')],
+      [corpusSample('fabricado', '1.0.0', dir)],
+      'gate'
+    )
+
+    // Forced on, and it says so. The rule is opt-in, so re-grading under the
+    // shipped default could never block anything and the number would say
+    // nothing about the rule — which is the only thing it is being asked about.
+    expect(r.ruleEnabled).toBe(true)
+    expect(DEFAULT_THRESHOLDS.gate.blockFabricatedProfile).toBe(false)
+
+    expect(r.graded).toBe(1)
+    expect(r.blocked).toBe(1)
+    expect(r.recall!.rate).toBe(1)
+    expect(r.statement).toContain('fabricated-profile rule switched on')
+    // And the historical verdict survives alongside it: the point is that they
+    // disagree, so neither may overwrite the other.
+    expect(r.samples[0]!.historicalGateBlocked).toBe(false)
+    expect(r.samples[0]!.historicalVerdict).toBe('PASS')
+    expect(r.samples[0]!.blocked).toBe(true)
+  })
+
+  it('a sample with no snapshot is reported as not re-graded, never as a miss', async () => {
+    const r = await regradeWithCurrentEngine([sampleOf('sin-captura', '1.0.0')], [], 'gate')
+
+    expect(r.noSnapshot).toBe(1)
+    expect(r.graded).toBe(0)
+    expect(r.blocked).toBe(0)
+    expect(r.samples[0]!.detail).toContain('no .ngpack')
+  })
+
+  it('a contaminated capture is not used to re-grade anything', async () => {
+    const root = makeTempDir('ng-regrade-cont-')
+    const dir = writeCapture(root, {
+      pkg: 'fabricado', version: '1.0.0',
+      packument: makeFabricatedPackument(),
+      metadata: { label: 'unconfirmed', weeklyDownloads: 0 },
+    })
+
+    const r = await regradeWithCurrentEngine(
+      [sampleOf('fabricado', '1.0.0')],
+      [{ ...corpusSample('fabricado', '1.0.0', dir), contaminated: true }],
+      'gate'
+    )
+    expect(r.noSnapshot).toBe(1)
+  })
+})
+
+/**
+ * bench reported a 0.20% false-positive rate for two days that had been measured
+ * on engine v0.3.2 with the fabricated-profile rule switched off, and printed it
+ * next to v1.1.0 with the rule on. Nothing in the output said so.
+ */
+describe('a saved fp-bench run declares how far it is from the engine quoting it', () => {
+  const artifact = (over: Partial<FpBenchArtifact> = {}): FpBenchArtifact => ({
+    ...buildArtifact({
+      rows: [],
+      gate: summarize([], 'gate'),
+      audit: summarize([], 'audit'),
+      sampling: { mode: 'top', harvestQueries: [], poolSize: 0, n: 0 },
+      generatedAt: '2026-08-12T00:00:00Z',
+    }),
+    ...over,
+  })
+
+  it('a run from another engine version is called stale by name', () => {
+    const lines = artifactStaleness(artifact({ engineVersion: '0.3.2' }), 'gate')
+    expect(lines.join(' ')).toContain('v0.3.2')
+    expect(lines.join(' ')).toContain(engineVersion())
+    expect(lines.join(' ')).toContain('fp-bench')
+  })
+
+  // The v0.3.2 artifact records {mode, blockScore} and nothing else. A flag that
+  // did not exist cannot have been on, so the run was measured with the rule
+  // off — and quoting it beside a build that ships the rule on has to say so.
+  it('an artifact that predates the flag is compared against a build that ships the rule on', () => {
+    const a = artifact({
+      engineVersion: engineVersion(),
+      thresholds: {
+        gate: { mode: 'gate', blockScore: 70, blockFabricatedProfile: true },
+        audit: { mode: 'audit', blockScore: 40, blockFabricatedProfile: true },
+      },
+    })
+    // The saved run had it ON and this build ships it OFF: still a difference,
+    // still named.
+    expect(artifactStaleness(a, 'gate').join(' ')).toContain('rule ON')
+
+    const predatesFlag = artifact({
+      engineVersion: engineVersion(),
+      thresholds: {
+        gate: { mode: 'gate', blockScore: 70 },
+        audit: { mode: 'audit', blockScore: 40 },
+      } as unknown as FpBenchArtifact['thresholds'],
+    })
+    // The shipped default is off, and a run that predates the flag was off too:
+    // no difference, so no alarm. The wording is pinned by the ON case above.
+    expect(artifactStaleness(predatesFlag, 'gate')).toEqual([])
+  })
+
+  it('a change in the block threshold is named too', () => {
+    const a = artifact({
+      engineVersion: engineVersion(),
+      thresholds: {
+        ...DEFAULT_THRESHOLDS,
+        gate: { ...DEFAULT_THRESHOLDS.gate, blockScore: 50 },
+      },
+    })
+    expect(artifactStaleness(a, 'gate').join(' ')).toContain('blockScore 50')
+  })
+
+  it('a run on this engine with this config declares nothing', () => {
+    const a = artifact({ engineVersion: engineVersion(), thresholds: DEFAULT_THRESHOLDS })
+    expect(artifactStaleness(a, 'gate')).toEqual([])
+  })
+
+  // The honest answer to "re-run fp-bench with the rule on": a fresh run is
+  // necessary and still cannot measure this rule, because its sampling frame
+  // excludes the class the rule fires on.
+  it('a download-ranked sample declares that it holds no candidate for the rule', () => {
+    const row = (over: Record<string, boolean>) => ({
+      package: 'p', downloads: 5000,
+      gate: { verdict: 'PASS', score: 0, regime: 'genome', signals: [] },
+      audit: { verdict: 'PASS', score: 0, regime: 'genome', signals: [] },
+      fabricatedProfile: {
+        matches: false,
+        localConjuncts: false,
+        conjuncts: {
+          noGenome: false, youngName: false, tiny: true,
+          noRepository: false, zeroDownloads: false, ...over,
+        },
+      },
+    })
+
+    const a = artifact({ engineVersion: engineVersion(), packages: [row({}), row({})] })
+    const spots = artifactBlindSpots(a).join(' ')
+
+    expect(spots).toContain('no candidate')
+    expect(spots).toContain('0/2 names under seven days old')
+    expect(spots).toContain('ranked by')
+  })
+
+  it('a sample that does hold candidates declares no blind spot', () => {
+    const a = artifact({
+      engineVersion: engineVersion(),
+      packages: [{
+        package: 'p', downloads: 0,
+        gate: { verdict: 'PASS', score: 0, regime: 'no-genome', signals: [] },
+        audit: { verdict: 'PASS', score: 0, regime: 'no-genome', signals: [] },
+        fabricatedProfile: {
+          matches: false, localConjuncts: true,
+          conjuncts: { noGenome: true, youngName: true, tiny: true, noRepository: true, zeroDownloads: false },
+        },
+      }],
+    })
+    expect(artifactBlindSpots(a)).toEqual([])
+  })
+
+  it('an artifact with no per-package conjunction says so rather than passing', () => {
+    const a = artifact({
+      engineVersion: engineVersion(),
+      packages: [{
+        package: 'p', downloads: 5000,
+        gate: { verdict: 'PASS', score: 0, regime: 'genome', signals: [] },
+        audit: { verdict: 'PASS', score: 0, regime: 'genome', signals: [] },
+      }],
+    })
+    expect(artifactBlindSpots(a).join(' ')).toContain('does not record the conjunction')
+  })
+})
+
+/**
+ * Two artifacts from the same day and the same engine, one an ablation run: the
+ * selection rule was "newest wins", so the ablation saved an hour later took
+ * precedence over the run that matched the shipped config, which sat unread on
+ * disk beside it. Declaring the mismatch is necessary and is not a substitute
+ * for not making it.
+ */
+describe('bench reads the run that measured this engine, not the newest file', () => {
+  const artifactAt = (generatedAt: string, ruleOn: boolean): FpBenchArtifact => ({
+    ...buildArtifact({
+      rows: [],
+      gate: summarize([], 'gate'),
+      audit: summarize([], 'audit'),
+      sampling: { mode: 'top', harvestQueries: [], poolSize: 0, n: 0 },
+      generatedAt,
+    }),
+    thresholds: {
+      gate: { ...DEFAULT_THRESHOLDS.gate, blockFabricatedProfile: ruleOn },
+      audit: { ...DEFAULT_THRESHOLDS.audit, blockFabricatedProfile: ruleOn },
+    },
+  })
+
+  const shipped = DEFAULT_THRESHOLDS.gate.blockFabricatedProfile === true
+
+  it('a newer run under a config nobody ships is passed over for one that matches', () => {
+    const dir = makeTempDir('ng-fp-select-')
+    // The matching run first, the ablation an hour later — the order that broke it.
+    writeFileSync(join(dir, 'match.json'), JSON.stringify(artifactAt('2026-08-16T01:15:33Z', shipped)))
+    writeFileSync(join(dir, 'ablation.json'), JSON.stringify(artifactAt('2026-08-16T01:49:50Z', !shipped)))
+
+    // Newest by date is the ablation.
+    expect(loadArtifacts(dir)[0]!.artifact.generatedAt).toBe('2026-08-16T01:49:50Z')
+
+    const report = buildFalsePositiveReport({
+      mode: 'gate', cleanResults: [], cleanTotal: 0, offline: true, fpResultsDir: dir,
+    })
+    expect(report.sourceDetail).toContain('match.json')
+    expect(report.staleness).toEqual([])
+  })
+
+  it('with nothing matching it still reports, and says what it is reporting', () => {
+    const dir = makeTempDir('ng-fp-select-none-')
+    writeFileSync(join(dir, 'only.json'), JSON.stringify(artifactAt('2026-08-16T01:49:50Z', !shipped)))
+
+    const report = buildFalsePositiveReport({
+      mode: 'gate', cleanResults: [], cleanTotal: 0, offline: true, fpResultsDir: dir,
+    })
+    expect(report.source).toBe('fp-bench')
+    expect(report.staleness.join(' ')).toContain('fabricated-profile rule')
+  })
+})

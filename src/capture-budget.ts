@@ -7,7 +7,7 @@
 // neither changes what gets detected.
 
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { gzipSync, gunzipSync } from 'node:zlib'
 import type { CaptureLabel, NgpackManifest } from './ngpack.js'
 import { deleteObject, listObjects, objectSize, OBJECTS_DIR } from './object-store.js'
@@ -231,6 +231,90 @@ export const DEFAULT_QUARANTINE: QuarantinePolicy = {
   maxBytes: 8 * 1024 ** 2,
 }
 
+// A capture is bytes and a record, and only the bytes are expensive.
+//
+// Both deleters in this file remove `unconfirmed` captures and leave `labelled`
+// ones alone, which is the right policy for disk and exactly the wrong one for a
+// denominator: the numerator of the precision fraction is protected from
+// deletion and the denominator is not, and rotation takes the oldest first —
+// the ones closest to the thirty days at which the answer would have arrived.
+// Left as it was, precision would climb on its own as the corpus aged, and the
+// climb would be the deleter rather than the filter.
+//
+// Quarantine retention is seven days and a verdict takes thirty, so this is not
+// a corner case. It is what happens to every capture that is never labelled.
+//
+// One line per deleted capture, so the name stays in the denominator after the
+// artifact is gone. It is small: no packument, no tarball, just what a
+// denominator needs.
+export const EXPIRY_LOG = 'expired-captures.ndjson'
+
+export interface ExpiredCapture {
+  package: string
+  version: string
+  capturedAt: string
+  captureReason?: string
+  deletedAt: string
+  // Which deleter took it, because they answer different questions: 'expiry' is
+  // the retention policy working as designed, 'rotation' is the disk cap biting
+  // and a sign the budget needs revisiting.
+  deletedBy: 'expiry' | 'rotation'
+}
+
+// Written beside the other ndjson logs rather than inside captures/, which is
+// the directory being emptied.
+export function recordExpiredCaptures(
+  capturesDir: string,
+  rows: ExpiredCapture[]
+): void {
+  if (rows.length === 0) return
+  try {
+    writeFileSync(
+      join(dirname(capturesDir), EXPIRY_LOG),
+      rows.map(r => JSON.stringify(r)).join('\n') + '\n',
+      { flag: 'a' }
+    )
+  } catch { /* one lost line does not invalidate the series */ }
+}
+
+export function readExpiredCaptures(capturesDir: string): ExpiredCapture[] {
+  const path = join(dirname(capturesDir), EXPIRY_LOG)
+  if (!existsSync(path)) return []
+
+  const rows: ExpiredCapture[] = []
+  for (const line of readFileSync(path, 'utf-8').split('\n')) {
+    if (!line.trim()) continue
+    try { rows.push(JSON.parse(line) as ExpiredCapture) } catch { /* skip */ }
+  }
+  return rows
+}
+
+// What a directory about to be deleted was, read before it goes.
+function describeCapture(
+  path: string,
+  deletedBy: ExpiredCapture['deletedBy'],
+  now: number
+): ExpiredCapture | null {
+  const metaPath = join(path, 'capture-metadata.json')
+  if (!existsSync(metaPath)) return null
+  try {
+    const meta = JSON.parse(readFileSync(metaPath, 'utf-8')) as {
+      package?: string; version?: string; capturedAt?: string; captureReason?: string
+    }
+    if (!meta.package) return null
+    return {
+      package: meta.package,
+      version: meta.version ?? '',
+      capturedAt: meta.capturedAt ?? '',
+      captureReason: meta.captureReason,
+      deletedAt: new Date(now).toISOString(),
+      deletedBy,
+    }
+  } catch {
+    return null
+  }
+}
+
 export interface QuarantineSweep {
   expired: string[]
   kept: number
@@ -291,6 +375,8 @@ export function sweepQuarantine(
   }
   if (!existsSync(capturesDir)) return result
 
+  const expired: ExpiredCapture[] = []
+
   for (const name of readdirSync(capturesDir)) {
     const path = join(capturesDir, name)
     const metaPath = join(path, 'capture-metadata.json')
@@ -313,11 +399,18 @@ export function sweepQuarantine(
       continue
     }
 
+    // Read before the delete, appended after: a record written for a directory
+    // that then failed to go would claim a loss that did not happen.
+    const record = describeCapture(path, 'expiry', now)
+
     if (!dryRun) {
       try { rmSync(path, { recursive: true, force: true }) } catch { continue }
     }
+    if (record) expired.push(record)
     result.expired.push(path)
   }
+
+  if (!dryRun) recordExpiredCaptures(capturesDir, expired)
 
   // After the directories, never before: an object is only orphaned once the
   // last capture naming it is gone.
@@ -437,6 +530,8 @@ export function rotateCaptures(
   const store = capturesDir
 
   const deleted: RotationCandidate[] = []
+  const expired: ExpiredCapture[] = []
+  const deletedAt = Date.now()
   let objectsCollected = 0
   let objectBytesFreed = 0
 
@@ -448,12 +543,17 @@ export function rotateCaptures(
     // deletion, so the accounting below is the bytes that will actually go.
     const orphaned = hashes.filter(h => (references.get(h) ?? 0) <= 1)
 
+    // Read before the delete: afterwards there is nothing left to read it from,
+    // and the name is the whole point of the record.
+    const record = describeCapture(candidate.path, 'rotation', deletedAt)
+
     // The directory being deleted goes first, and only then the objects it was
     // the last holder of. A failed rmSync must not leave a capture pointing at
     // bytes that are already gone.
     if (!dryRun) {
       try { rmSync(candidate.path, { recursive: true, force: true }) } catch { continue }
     }
+    if (record) expired.push(record)
 
     let freed = 0
     for (const hash of orphaned) {
@@ -468,6 +568,8 @@ export function rotateCaptures(
     total -= candidate.bytes + freed
     deleted.push(candidate)
   }
+
+  if (!dryRun) recordExpiredCaptures(capturesDir, expired)
 
   return {
     before,

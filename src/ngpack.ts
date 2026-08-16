@@ -427,6 +427,14 @@ export interface CaptureMetadata {
   // answer for itself later. Absent means never asked, never zero.
   weeklyDownloads?: number | null
   downloadWindowEnd?: string | null
+  // Whether that week overlapped the name's life. A zero over a window that
+  // closed before the package existed is arithmetic, and so is the zero npm
+  // returns as a 404 for a name it has never heard of — which is the normal
+  // answer for a package published minutes ago, and therefore the answer for
+  // almost every capture of this class. It has to be recorded here because
+  // answering it needs the packument and the week npm reported on, and both are
+  // gone by the time anyone grades the removal.
+  downloadWindowCovers?: boolean | null
   notes?: string
   // Captures can hold live malware; this rides along with every snapshot so the
   // warning survives being copied out of context.
