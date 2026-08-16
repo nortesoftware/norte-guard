@@ -778,6 +778,13 @@ export async function startWatcher(config: WatcherConfig): Promise<void> {
       `${expired.kept} within window - ${expired.promoted} promoted and kept`
     )
   }
+  // A refusal deletes nothing, so every count above stays zero and the run looks
+  // like a quiet one. It is the opposite: it is the collector saying it could not
+  // tell orphans from the whole store, on the only copy of bytes npm has already
+  // removed.
+  if (expired.objectSweepRefused) {
+    console.error(`OBJECT SWEEP REFUSED: ${expired.objectSweepRefused}`)
+  }
 
   // Before the first capture, so a run that starts over the cap frees space
   // instead of adding to it.

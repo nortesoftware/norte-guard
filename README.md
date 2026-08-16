@@ -13,7 +13,9 @@ Package managers do not answer that. norte-guard does.
 npx norte-guard inspect keyv@6.0.0
 ```
 
-No account, no telemetry, no cloud, zero runtime dependencies.
+No account, no telemetry, no cloud. One runtime dependency: `acorn`, pinned to an
+exact version with its integrity hash, and itself dependency-free. A tool whose
+subject is npm supply-chain risk cannot answer "what do you install?" with a list.
 
 ## Scope
 
@@ -55,14 +57,14 @@ Full reference: [docs/commands.md](docs/commands.md).
 
 ## Numbers
 
-Measured 2026-08-16, engine v1.1.0, over a stratified sample of 500 packages
+Measured 2026-08-16, engine v1.2.0, over a stratified sample of 500 packages
 drawn from the registry by weekly downloads.
 
 | | rate | 95% Wilson CI |
 |---|---|---|
 | non-PASS in gate mode (BLOCK + WARN) | 0.60% | 0.20%-1.75% |
-| BLOCK, the only verdict that fails a build | 0.20% | 0.04%-1.12% |
-| unevaluated (`INSUFFICIENT_HISTORY`, exit 0) | 22.20% | 18.78%-26.05% |
+| BLOCK, the only verdict that fails a build | 0.00% | 0.00%-0.76% |
+| unevaluated (`INSUFFICIENT_HISTORY`, exit 0) | 23.00% | 19.53%-26.89% |
 
 The previous figure here, 0.20% non-PASS, was measured on v0.3.2 and stayed after
 the engine moved on. `bench` now refuses to print a saved rate without declaring
@@ -134,8 +136,8 @@ Details: [docs/methodology.md](docs/methodology.md).
 ## Why not Socket, Aikido or Snyk
 
 They are cloud services that need an account and see your lockfile, or CVE
-databases that cannot see a zero-day. norte-guard runs locally with no
-dependencies.
+databases that cannot see a zero-day. norte-guard runs locally, on one pinned
+dependency.
 
 And one thing none of them prints: **what it does not cover.** A tool that
 claims everything is a tool you cannot calibrate against, because there is

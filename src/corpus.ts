@@ -9,6 +9,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { objectPath } from './object-store.js'
 import { writeFileSync } from 'node:fs'
 import { rateWithCI, type RateWithCI } from './stats.js'
 import { EXPIRY_LOG as EXPIRY_LOG_NAME } from './capture-budget.js'
@@ -24,7 +25,15 @@ export interface CorpusSample {
   labelSource?: string
   labeledAt?: string
   notes?: string
+  // The manifest DECLARES a captured version. It is not a statement that the
+  // bytes are on disk, and it was read as one for long enough to matter: 3,261
+  // of 4,884 captures — 66.8%, including six of the eight confirmed_malicious —
+  // have no tarball left, and nothing reported it because layer 1 analyses the
+  // packument and never asks for the artifact.
   hasTarball: boolean
+  // Whether the bytes are actually there, checked. Anything that needs to read
+  // a package's contents has to filter on this one.
+  tarballPresent: boolean
   // No capture-metadata.json, so 'unconfirmed' is this loader's default rather
   // than a recorded decision.
   labelAssumed: boolean
@@ -120,6 +129,7 @@ function readSample(dir: string): CorpusSample | null {
     ngpackPath: dir,
     capturedAt: manifest.capturedAt,
     hasTarball: manifest.versionsIncluded.length > 0,
+    tarballPresent: tarballPresent(dir, manifest, version),
     labelAssumed: true,
     ...classifyContamination(undefined, true),
   })
@@ -157,6 +167,7 @@ function readSample(dir: string): CorpusSample | null {
       ? `label "${meta.label}" ignored: no labelSource. ${meta.notes ?? ''}`.trim()
       : meta.notes,
     hasTarball: manifest.versionsIncluded.length > 0,
+    tarballPresent: tarballPresent(dir, manifest, meta.version || version),
     labelAssumed: false,
     captureReason: meta.captureReason,
     engineVersion: meta.engineVersion,
@@ -166,6 +177,28 @@ function readSample(dir: string): CorpusSample | null {
     composition: meta.composition ?? compositionFromNotes(meta.notes),
     ...classifyContamination(meta.captureReason, false),
   }
+}
+
+// Whether the bytes a capture declares are still where it left them. Both
+// layouts have to be checked: older captures hold the tarball inline, newer ones
+// name an object in the shared store, and the store is what rotation prunes.
+//
+// Cheap enough to run on every load — one stat per capture — and the alternative
+// is what happened: a corpus that reported 4,884 samples when two thirds of them
+// were a manifest and a packument with nothing behind them.
+function tarballPresent(dir: string, manifest: NgpackManifest, version: string): boolean {
+  if (!version) return false
+
+  const hash = manifest.objects?.[version]
+  if (hash && manifest.objectStore) {
+    // Resolved against the capture's own parent, never against the recorded
+    // objectStore string: that is a path relative to wherever the watcher
+    // happened to be running, and following it points at whatever store sits
+    // under the current shell's cwd.
+    return existsSync(objectPath(join(dir, '..'), hash))
+  }
+
+  return existsSync(join(dir, 'tarballs', `${version}.tgz`))
 }
 
 // Captures written before composition was recorded still carry the same facts in
@@ -487,9 +520,23 @@ export function describeCorpusProgress(corpus: LabeledCorpus): string {
     ? corpus.firstCaptureAt.slice(0, 10)
     : '(no captures)'
 
+  // The artifact count belongs on the same line as the capture count, because
+  // for two days they were the same number in everyone's head and they are not
+  // the same number on disk. Layer 1 reads the packument, so a capture whose
+  // tarball is gone analyses exactly like one that still has it, and nothing
+  // downstream had any reason to notice — `norte-guard analyzability` was the
+  // first thing to ask.
+  const withBytes = corpus.samples.filter(s => s.tarballPresent).length
+  const confirmedWithBytes = corpus.confirmedMalicious.filter(s => s.tarballPresent).length
+  const missing = corpus.samples.length - withBytes
+
   return (
     `corpus building since ${since}: ` +
-    `${corpus.samples.length} captures, ${corpus.confirmedMalicious.length} confirmed`
+    `${corpus.samples.length} captures, ${corpus.confirmedMalicious.length} confirmed` +
+    (missing > 0
+      ? `; ${withBytes} still hold their tarball (${confirmedWithBytes} of the confirmed ones), ` +
+        `the other ${missing} are a manifest and a packument with nothing behind them`
+      : '')
   )
 }
 

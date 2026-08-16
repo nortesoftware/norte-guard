@@ -248,6 +248,18 @@ export class NgpackSource implements PackageSource {
 
   get manifest(): NgpackManifest { return this.contents.manifest }
 
+  // The bytes, already verified at construction, without the Promise the
+  // registry source needs. A corpus pass opens thousands of snapshots and every
+  // one of their tarballs is on disk and in memory by the time it is asked for;
+  // an async accessor there buys nothing and makes the caller's loop harder to
+  // bound. Null rather than throwing: a snapshot whose object the store no
+  // longer holds is missing bytes, not a corrupt capture, and the two are told
+  // apart by `missingTarballs`.
+  tarballSync(version?: string): Buffer | null {
+    if (version) return this.contents.tarballs[version] ?? null
+    return Object.values(this.contents.tarballs)[0] ?? null
+  }
+
   // Empty when every declared tarball is present. Lets a caller report a
   // snapshot as partial without discovering it by asking for bytes and failing.
   get missingTarballs(): string[] { return this.contents.missingTarballs ?? [] }

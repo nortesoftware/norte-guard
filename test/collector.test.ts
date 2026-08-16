@@ -434,6 +434,83 @@ describe('collectOrphanObjects', () => {
     expect(existsSync(objectPath(root, orphan.sha256))).toBe(false)
     expect(existsSync(objectPath(root, held.sha256))).toBe(true)
   })
+
+  // The event this guard exists for, reproduced: 3,169 of the 4,237 objects this
+  // project's store had ever held were deleted between 2026-08-14T22:41 and
+  // 2026-08-15T03:34 — every object written before that instant and none after.
+  // The capture directories survived and still name those hashes, so whatever
+  // ran could not see them. 9.2GB, and the packages are removed from npm within
+  // hours, so there is no second copy at any price.
+  it('a scan that can see no captures deletes nothing', () => {
+    const root = tempDir('ng-gc-blind-')
+    const a = putObject(root, Buffer.alloc(3000, 1))
+    const b = putObject(root, Buffer.alloc(3000, 2))
+    const c = putObject(root, Buffer.alloc(3000, 3))
+
+    // No capture directories at all: every object looks like an orphan.
+    const result = collectOrphanObjects(root, root)
+
+    expect(result.objects).toBe(0)
+    expect(result.bytes).toBe(0)
+    expect(result.refused).toContain('could not read the captures')
+    expect(result.refused).toContain('3 of 3')
+    for (const o of [a, b, c]) {
+      expect(existsSync(objectPath(root, o.sha256))).toBe(true)
+    }
+  })
+
+  it('a sweep that would take most of the store refuses before deleting any of it', () => {
+    const root = tempDir('ng-gc-majority-')
+    const held = putObject(root, Buffer.alloc(1000, 4))
+    const orphans = [2, 3, 4].map(n => putObject(root, Buffer.alloc(1000, n)))
+
+    const dir = join(root, 'viva@1.0.0_1')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'manifest.json'), JSON.stringify({
+      version: 1, package: 'viva', capturedAt: '2026-08-10T00:00:00Z',
+      capturedFrom: 'https://registry.npmjs.org',
+      versionsIncluded: ['1.0.0'], hashes: {},
+      objectStore: root, objects: { '1.0.0': held.sha256 },
+    }))
+
+    // 3 of 4 unreferenced is 75%, over the ceiling.
+    const result = collectOrphanObjects(root, root)
+    expect(result.objects).toBe(0)
+    expect(result.refused).toBeTruthy()
+    for (const o of orphans) {
+      expect(existsSync(objectPath(root, o.sha256))).toBe(true)
+    }
+  })
+
+  it('an ordinary sweep is not blocked by the guard', () => {
+    const root = tempDir('ng-gc-ordinary-')
+    const orphan = putObject(root, Buffer.alloc(1000, 9))
+    const held = [1, 2, 3].map(n => putObject(root, Buffer.alloc(1000, n)))
+
+    const dir = join(root, 'viva@1.0.0_1')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'manifest.json'), JSON.stringify({
+      version: 1, package: 'viva', capturedAt: '2026-08-10T00:00:00Z',
+      capturedFrom: 'https://registry.npmjs.org',
+      versionsIncluded: ['1.0.0', '1.0.1', '1.0.2'], hashes: {},
+      objectStore: root,
+      objects: { '1.0.0': held[0]!.sha256, '1.0.1': held[1]!.sha256, '1.0.2': held[2]!.sha256 },
+    }))
+
+    // 1 of 4 unreferenced is 25%, under the ceiling.
+    const result = collectOrphanObjects(root, root)
+    expect(result.refused).toBeUndefined()
+    expect(result.objects).toBe(1)
+    expect(existsSync(objectPath(root, orphan.sha256))).toBe(false)
+  })
+
+  it('an empty store is not a refusal, it is nothing to do', () => {
+    const root = tempDir('ng-gc-empty-')
+    mkdirSync(root, { recursive: true })
+    const result = collectOrphanObjects(root, root)
+    expect(result.objects).toBe(0)
+    expect(result.refused).toBeUndefined()
+  })
 })
 
 describe('formatBytes / directorySize', () => {
@@ -487,7 +564,7 @@ describe('capture composition', () => {
     const sample = (pkg: string, composition: Partial<import('../src/ngpack.js').CaptureComposition>) => ({
       package: pkg, version: '1.0.0', label: 'unconfirmed' as const,
       ngpackPath: '/x', capturedAt: '2026-08-12T00:00:00Z',
-      hasTarball: true, labelAssumed: false, contaminated: false,
+      hasTarball: true, tarballPresent: true, labelAssumed: false, contaminated: false,
       composition: {
         regime: 'no-genome', signals: [], firstPublication: true,
         ghost: null, ghostKind: null, newInstallScript: false, platformFamily: null,
@@ -1213,7 +1290,7 @@ describe('precision of the capture filter', () => {
   const sample = (over: Partial<CorpusSample>): CorpusSample => ({
     package: 'p', version: '1.0.0', label: 'unconfirmed',
     ngpackPath: '/dev/null', capturedAt: new Date(NOW - day).toISOString(),
-    hasTarball: true, labelAssumed: false,
+    hasTarball: true, tarballPresent: true, labelAssumed: false,
     captureReason: QUARANTINE_CAPTURE_REASON, contaminated: false,
     ...over,
   })

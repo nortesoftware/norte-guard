@@ -357,6 +357,184 @@ async function main(): Promise<void> {
   // normal right now, and an attack is a change in what is normal, so a cut-off
   // recomputed from it rises exactly when it should not. This answers what a
   // budget costs in disk, and refuses the other question.
+  // What can be looked at at all, before anything looks. This detects nothing:
+  // it measures the size of the blind spot every detector reports PASS into.
+  if (command === 'analyzability') {
+    const {
+      runCorpusAnalyzability, collectMetrics, checkThreshold, analyzeCapture,
+    } = await import('./analyzability-run.js')
+    const { MINIFIED_THRESHOLD } = await import('./analyzability.js')
+    const { engineVersion } = await import('./fp-bench-store.js')
+    const { formatRateWithCI, pct } = await import('./stats.js')
+    const { writeFileSync: write, mkdirSync } = await import('node:fs')
+
+    const num = (flag: string, fallback: number) => {
+      const raw = args.find(a => a.startsWith(`--${flag}=`))?.split('=')[1]
+      const parsed = raw === undefined ? NaN : Number(raw)
+      return Number.isFinite(parsed) ? parsed : fallback
+    }
+    const sample = num('sample', 0) || undefined
+    const outDir = args.find(a => a.startsWith('--results-dir='))?.split('=')[1] ?? 'analyzability-results'
+
+    // The derivation mode. It writes the raw per-file metrics so the threshold
+    // in analyzability.ts can be traced to a run instead of to a preference.
+    if (args.includes('--metrics')) {
+      const rows = collectMetrics({
+        sample: sample ?? 500,
+        onProgress: (d, t) => { if (d % 50 === 0) process.stderr.write(`  ${d}/${t}\n`) },
+      })
+      mkdirSync(outDir, { recursive: true })
+      const path = `${outDir}/metrics-${new Date().toISOString().slice(0, 10)}.json`
+      write(path, JSON.stringify(rows))
+      console.log(`${rows.length} parsed files, ${rows.filter(r => r.selfLabelledMinified).length} self-labelled minified`)
+      console.log(`written to ${path}`)
+      console.log(`\nAgainst the threshold currently in analyzability.ts:`)
+      const check = checkThreshold(rows, MINIFIED_THRESHOLD)
+      console.log(`  caught ${check.truePositiveRate === null ? 'n/a' : pct(check.truePositiveRate)} of the self-labelled minified files`)
+      console.log(`  fired on ${check.falsePositiveRate === null ? 'n/a' : pct(check.falsePositiveRate)} of the rest (an upper bound: some of those are minified and simply unlabelled)`)
+      return
+    }
+
+    // One capture, with its file list. The aggregate cannot say why a particular
+    // package came out at 0%.
+    const one = args.find(a => a.startsWith('--capture='))?.split('=')[1]
+    if (one) {
+      const { loadCorpus } = await import('./corpus.js')
+      const corpus = loadCorpus()
+      const match = corpus.samples.find(s => s.package === one || s.ngpackPath === one)
+      if (!match) {
+        console.error(`No capture for ${one}`)
+        process.exit(1)
+      }
+      const result = analyzeCapture(match, { threshold: MINIFIED_THRESHOLD, keepFiles: true })
+      console.log(`\n${result.package}@${result.version}  ${result.ngpackPath}`)
+      if (result.error) console.log(`  ${result.error}`)
+      console.log(
+        `  coverage ${result.coverage === null ? 'n/a (nothing executable)' : pct(result.coverage)}` +
+        `  ${result.coveredFiles}/${result.executableFiles} files, ` +
+        `${result.coveredBytes}/${result.executableBytes} bytes`
+      )
+      for (const f of result.files) {
+        if (f.reasons.length === 0 && f.covered) continue
+        if (f.reasons.length === 0) continue
+        console.log(`    ${f.reasons.join(',').padEnd(28)} ${String(f.bytes).padStart(9)}  ${f.name}`)
+      }
+      return
+    }
+
+    const started = Date.now()
+    const report = runCorpusAnalyzability({
+      threshold: MINIFIED_THRESHOLD,
+      sample,
+      engineVersion: engineVersion(),
+      onProgress: (d, t) => { if (d % 100 === 0) process.stderr.write(`  ${d}/${t}\n`) },
+    })
+
+    console.log(`\nANALYZABILITY  norte-guard v${report.engineVersion}`)
+    console.log(`${report.analysed} captures in ${((Date.now() - started) / 1000).toFixed(0)}s` +
+      (sample ? `  (sampled from the corpus, confirmed_malicious always included)` : ''))
+    console.log(`  ${report.unreadable} unreadable, ${report.nothingExecutable} with nothing executable in them`)
+
+    // Printed first and on its own, because it is not a coverage figure and it
+    // is the largest fact about this corpus. Nothing reported it before: layer 1
+    // reads the packument and never asks for the artifact, so a capture whose
+    // bytes are gone looks identical to one that still has them.
+    if (report.withoutBytes > 0) {
+      const share = report.corpusTotal > 0 ? report.withoutBytes / report.corpusTotal : 0
+      console.log(
+        `\n  ${report.withoutBytes} of ${report.corpusTotal} uncontaminated captures (${pct(share)}) have NO TARBALL BYTES\n` +
+        `  left on disk and were excluded before the pass began. They are a manifest and a\n` +
+        `  packument with nothing behind them. Everything below is measured on the rest.`
+      )
+    }
+
+    console.log(`\nCOVERAGE OF THE EXECUTABLE SURFACE`)
+    console.log(`  by bytes                        ${report.byteCoverage === null ? 'n/a' : pct(report.byteCoverage)}`)
+    console.log(`  median capture                  ${report.medianCaptureCoverage === null ? 'n/a' : pct(report.medianCaptureCoverage)}`)
+    console.log(`  fully covered                   ${report.fullyCovered}`)
+    console.log(`  nothing covered at all          ${report.fullyOpaque}`)
+    console.log(`  distribution`)
+    for (const b of report.distribution) {
+      console.log(`    ${b.label.padEnd(10)} ${String(b.captures).padStart(6)}`)
+    }
+
+    console.log(`\nWHY THE REST IS NOT COVERED  (captures with at least one such file)`)
+    for (const r of report.reasons) {
+      if (r.captures === 0) continue
+      console.log(
+        `  ${r.reason.padEnd(18)} ${formatRateWithCI(r.captureRate.successes, r.captureRate.n).padEnd(44)}` +
+        ` ${r.files} files, ${(r.bytes / 1e6).toFixed(1)} MB`
+      )
+    }
+    console.log(
+      `\n  A file carries every reason that applies, so these columns overlap and do\n` +
+      `  not sum to the uncovered total.`
+    )
+
+    console.log(`\nSHIPS A BINARY, WASM, BYTECODE OR UNREADABLE MINIFIED CODE`)
+    console.log(`  ${formatRateWithCI(report.shipsOpaqueExecutable.successes, report.shipsOpaqueExecutable.n)}`)
+
+    console.log(`\nHELD OUT OF THE DENOMINATOR  (ships alongside what runs, is not what runs)`)
+    for (const [kind, totals] of Object.entries(report.heldOut).sort(([, a], [, b]) => b!.bytes - a!.bytes)) {
+      console.log(`  ${kind.padEnd(18)} ${String(totals!.files).padStart(7)} files  ${(totals!.bytes / 1e6).toFixed(1)} MB`)
+    }
+
+    console.log(`\nCONFIRMED_MALICIOUS`)
+    if (report.confirmedTotal === 0) {
+      console.log(`  none in the corpus`)
+    } else {
+      for (const c of report.confirmedMalicious) {
+        console.log(
+          `  ${`${c.package}@${c.version}`.padEnd(38)} ` +
+          `${c.coverage === null ? 'nothing executable' : pct(c.coverage).padStart(7)}` +
+          `  ${c.coveredFiles}/${c.executableFiles} files` +
+          (c.error ? `  ${c.error}` : '') +
+          (Object.keys(c.byReason).length > 0 ? `  [${Object.keys(c.byReason).join(', ')}]` : '')
+        )
+      }
+      const analysable = report.confirmedMalicious.filter(c => (c.coverage ?? 0) >= 0.999).length
+      // Both denominators on the same line. "1 of 2 fully analysable" is a
+      // sentence somebody quotes, and six of the eight are not in the two.
+      console.log(
+        `\n  ${analysable} of ${report.confirmedMalicious.length} fully analysable` +
+        (report.confirmedWithoutBytes > 0
+          ? ` — but that is ${analysable} of ${report.confirmedTotal} confirmed samples in total.\n` +
+            `  The other ${report.confirmedWithoutBytes} have no tarball bytes left, so nothing can be read from\n` +
+            `  them at any coverage. This corpus can answer the question for ` +
+            `${report.confirmedMalicious.length} of ${report.confirmedTotal}.`
+          : '.')
+      )
+    }
+
+    if (MINIFIED_THRESHOLD.bytesPerLine <= 0) {
+      console.log(
+        `\nNOTE: the minification threshold is unset, so no file is being marked minified.\n` +
+        `Derive it with \`norte-guard analyzability --metrics\` and put the result in\n` +
+        `analyzability.ts. Until then the "minified" row reads zero because nothing\n` +
+        `looked, not because nothing is minified.`
+      )
+    }
+
+    console.log(
+      `\nWHAT THIS CANNOT SAY\n` +
+      `  It measures reach, not risk. A fully covered package is one a parser could\n` +
+      `  read end to end, which is not a statement that it is safe.\n` +
+      `  The denominator is bytes that execute. A package is one 200MB binary and\n` +
+      `  3,000 small scripts by turns, so the byte figure and the median capture\n` +
+      `  figure disagree on purpose and neither replaces the other.\n` +
+      `  Coverage is fail-closed: one eval() of a runtime-built string makes a whole\n` +
+      `  file uncovered, because the parser cannot bound what the rest of it does.\n`
+    )
+
+    if (!args.includes('--no-save')) {
+      mkdirSync(outDir, { recursive: true })
+      const path = `${outDir}/${new Date().toISOString().slice(0, 10)}-v${report.engineVersion}.json`
+      write(path, JSON.stringify(report, null, 2))
+      console.log(`Saved to ${path}\n`)
+    }
+    return
+  }
+
   if (command === 'scores') {
     const dir = args.find(a => a.startsWith('--output='))?.split('=')[1] ?? './norte-guard-captures'
     const { readFileSync, existsSync } = await import('node:fs')
@@ -891,6 +1069,7 @@ COMMANDS
   approve <pkg> --reason=   Approve one package, including a blocked one
   bench                     Run the public benchmark
   corpus                    List captures, labels and composition
+  analyzability             How much of the corpus can be looked at at all
   scores                    Score distribution of the publish stream
   track                     Follow watched packages until they resolve
   track --add=<pkg>         Register a prediction, dated, before it resolves
@@ -904,6 +1083,24 @@ OPTIONS
   --mode=audit      Forensic: higher recall, false positives acceptable
   --json            JSON output
   --offline         bench without network: local .ngpack corpus only
+
+  analyzability
+      Measures reach, not risk, and detects nothing. Of the bytes in a capture
+      that can execute, what fraction could a conforming JavaScript parser read
+      and follow — and for the rest, which of parse failure, eval of a
+      runtime-built string, unresolvable require, native binary, WASM, bytecode
+      or minification put it out of reach. Fail closed: one eval makes a whole
+      file uncovered, because the parser cannot bound what the rest of it does.
+      Offline, over the .ngpack captures already on disk.
+
+      --sample=<n>         analyse n captures instead of all of them. The
+                           confirmed_malicious ones are always included.
+      --capture=<pkg>      one capture, with the per-file reasons
+      --metrics            re-derive the minification threshold: writes every
+                           per-file metric and checks the current cut against
+                           the files that label themselves
+      --results-dir=<d>    where the artifact lands (default analyzability-results)
+      --no-save            print without writing an artifact
   --output=<dir>    Capture directory (default: ./captures)
 
   --source=<path>   inspect an .ngpack instead of the registry. Takes either one

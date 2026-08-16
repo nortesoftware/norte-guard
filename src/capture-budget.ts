@@ -321,12 +321,34 @@ export interface QuarantineSweep {
   promoted: number
   objectsCollected: number
   objectBytesFreed: number
+  objectSweepRefused?: string
 }
 
 export interface ObjectCollection {
   objects: number
   bytes: number
+  // Set when the sweep declined to delete anything. A collector that cannot see
+  // the captures sees every object as an orphan, and the difference between
+  // "nothing references these" and "I could not read what references these" is
+  // invisible from inside the loop.
+  refused?: string
 }
+
+// A sweep that would take most of the store is not a sweep.
+//
+// Measured, not hypothetical: 3,169 of the 4,237 objects this store has ever
+// held were deleted in a single event between 2026-08-14T22:41 and
+// 2026-08-15T03:34 — every object written before that moment, and none after.
+// The capture directories survived and still name those hashes, so whatever ran
+// did not see them. The ledger says they were 9.2GB.
+//
+// Both deleters in this file protect what a manifest references, so the failure
+// was not in the arithmetic: it was that the reference set came back empty or
+// near-empty and the loop believed it. This is the check that would have caught
+// it — the one condition under which "everything is an orphan" is never the
+// right answer.
+export const ORPHAN_SWEEP_MAX_SHARE = 0.5
+
 
 // Mark and sweep over the shared store: an object survives if a capture still
 // on disk names it, and goes otherwise. This is the only thing that frees the
@@ -353,8 +375,26 @@ export function collectOrphanObjects(
     for (const hash of Object.values(manifest.objects ?? {})) referenced.add(hash)
   }
 
-  for (const hash of listObjects(storeRoot)) {
-    if (referenced.has(hash)) continue
+  const stored = listObjects(storeRoot)
+  const orphans = stored.filter(hash => !referenced.has(hash))
+
+  // Refused before anything is deleted, never partway through. The store is the
+  // only copy: npm removes these packages within hours, and an object deleted
+  // here cannot be re-fetched at any price.
+  if (stored.length > 0 && orphans.length > stored.length * ORPHAN_SWEEP_MAX_SHARE) {
+    return {
+      objects: 0,
+      bytes: 0,
+      refused:
+        `${orphans.length} of ${stored.length} objects look unreferenced, which is more than ` +
+        `${Math.round(ORPHAN_SWEEP_MAX_SHARE * 100)}% of the store. ${referenced.size} hashes were ` +
+        `found across the captures in ${capturesDir}. That is the shape of a scan that could not ` +
+        `read the captures, not of a store full of orphans, and this store is the only copy: the ` +
+        `packages in it are removed from npm within hours. Nothing was deleted.`,
+    }
+  }
+
+  for (const hash of orphans) {
     collection.objects++
     collection.bytes += dryRun ? objectSize(storeRoot, hash) : deleteObject(storeRoot, hash)
   }
@@ -417,6 +457,10 @@ export function sweepQuarantine(
   const collected = collectOrphanObjects(capturesDir, capturesDir, dryRun)
   result.objectsCollected = collected.objects
   result.objectBytesFreed = collected.bytes
+  // Carried up rather than swallowed: a sweep that refused is the one event a
+  // caller most needs to hear about, and it is silent by construction — nothing
+  // was deleted, so nothing in the counts says anything happened.
+  result.objectSweepRefused = collected.refused
 
   return result
 }

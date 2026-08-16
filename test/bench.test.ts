@@ -374,7 +374,27 @@ describe('corpus etiquetado', () => {
     writeCapture(root, { pkg: 'b', version: '1.0.0', packument: makeKeyvPackument(), metadata: null })
 
     expect(describeCorpusProgress(loadCorpus([root])))
-      .toBe('corpus building since 2026-08-12: 2 captures, 0 confirmed')
+      .toContain('corpus building since 2026-08-12: 2 captures, 0 confirmed')
+  })
+
+  // A capture count and an artifact count were the same number in everyone's
+  // head and are not the same number on disk: two thirds of the real corpus is
+  // a manifest and a packument with nothing behind them, and layer 1 never
+  // noticed because it analyses the packument.
+  it('a capture whose tarball is gone is counted as one, on the same line', () => {
+    const root = makeTempDir('ng-corpus-nobytes-')
+    // writeCapture creates the tarballs/ directory and no tarball in it, which
+    // is exactly the shape 3,261 real captures are in.
+    writeCapture(root, { pkg: 'a', version: '1.0.0', packument: makeKeyvPackument(), metadata: null })
+
+    const corpus = loadCorpus([root])
+    expect(corpus.samples[0]!.hasTarball).toBe(true)
+    expect(corpus.samples[0]!.tarballPresent).toBe(false)
+
+    const line = describeCorpusProgress(corpus)
+    expect(line).toContain('1 captures')
+    expect(line).toContain('0 still hold their tarball')
+    expect(line).toContain('nothing behind them')
   })
 
   it('public references without a snapshot are not samples', () => {
@@ -858,7 +878,7 @@ describe('takedown coverage counts the evidence that arrived after the sweep', (
     ngpackPath: `/captures/${pkg}`,
     capturedAt: '2026-08-13T09:27:00Z',
     labelSource: `npm-takedown: 0.0.1-security published over ${pkg}`,
-    hasTarball: true,
+    hasTarball: true, tarballPresent: true,
     labelAssumed: false,
     contaminated: false,
   })
@@ -1030,7 +1050,7 @@ describe('field recall is re-graded by the engine that is shipping', () => {
   const corpusSample = (pkg: string, version: string, dir: string): CorpusSample => ({
     package: pkg, version, label: 'confirmed_malicious', ngpackPath: dir,
     capturedAt: '2026-08-12T02:46:45.791Z',
-    labelSource: 'npm-takedown: 0.0.1-security', hasTarball: true,
+    labelSource: 'npm-takedown: 0.0.1-security', hasTarball: true, tarballPresent: true,
     labelAssumed: false, contaminated: false,
   })
 

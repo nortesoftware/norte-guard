@@ -1,0 +1,292 @@
+{
+  "ranAt": "2026-08-16T04:08:58.360Z",
+  "engineVersion": "1.2.0",
+  "threshold": {
+    "bytesPerLine": 130,
+    "shortIdentifierRatio": 0.5
+  },
+  "analysed": 1593,
+  "unreadable": 0,
+  "withoutBytes": 3262,
+  "corpusTotal": 4855,
+  "confirmedWithoutBytes": 6,
+  "confirmedTotal": 8,
+  "nothingExecutable": 118,
+  "totalExecutableBytes": 14647678088,
+  "totalCoveredBytes": 1348834832,
+  "byteCoverage": 0.09208523179554463,
+  "medianCaptureCoverage": 1,
+  "fullyCovered": 921,
+  "fullyOpaque": 123,
+  "distribution": [
+    {
+      "label": "0%",
+      "captures": 123
+    },
+    {
+      "label": "0-50%",
+      "captures": 269
+    },
+    {
+      "label": "50-90%",
+      "captures": 90
+    },
+    {
+      "label": "90-99.9%",
+      "captures": 72
+    },
+    {
+      "label": "100%",
+      "captures": 921
+    }
+  ],
+  "reasons": [
+    {
+      "reason": "minified",
+      "captures": 194,
+      "captureRate": {
+        "successes": 194,
+        "n": 1593,
+        "rate": 0.12178279974890144,
+        "low": 0.10662636509669204,
+        "high": 0.13875902566467088
+      },
+      "files": 122779,
+      "bytes": 760856102
+    },
+    {
+      "reason": "dynamic-require",
+      "captures": 177,
+      "captureRate": {
+        "successes": 177,
+        "n": 1593,
+        "rate": 0.1111111111111111,
+        "low": 0.09660387846322148,
+        "high": 0.1274894818299973
+      },
+      "files": 626,
+      "bytes": 210154684
+    },
+    {
+      "reason": "native-binary",
+      "captures": 157,
+      "captureRate": {
+        "successes": 157,
+        "n": 1593,
+        "rate": 0.09855618330194602,
+        "low": 0.0848704601902307,
+        "high": 0.1141734524934068
+      },
+      "files": 848,
+      "bytes": 10886527570
+    },
+    {
+      "reason": "foreign-script",
+      "captures": 150,
+      "captureRate": {
+        "successes": 150,
+        "n": 1593,
+        "rate": 0.09416195856873823,
+        "low": 0.08078028191694489,
+        "high": 0.10949632410333915
+      },
+      "files": 3646,
+      "bytes": 36169453
+    },
+    {
+      "reason": "dynamic-eval",
+      "captures": 117,
+      "captureRate": {
+        "successes": 117,
+        "n": 1593,
+        "rate": 0.07344632768361582,
+        "low": 0.061636271359098514,
+        "high": 0.08730874610537637
+      },
+      "files": 327,
+      "bytes": 328469055
+    },
+    {
+      "reason": "not-javascript",
+      "captures": 36,
+      "captureRate": {
+        "successes": 36,
+        "n": 1593,
+        "rate": 0.022598870056497175,
+        "low": 0.016367835375753096,
+        "high": 0.031126919269917456
+      },
+      "files": 52,
+      "bytes": 477192
+    },
+    {
+      "reason": "bytecode",
+      "captures": 31,
+      "captureRate": {
+        "successes": 31,
+        "n": 1593,
+        "rate": 0.0194601381042059,
+        "low": 0.013742941855135348,
+        "high": 0.027489450888139873
+      },
+      "files": 31,
+      "bytes": 480097120
+    },
+    {
+      "reason": "wasm",
+      "captures": 27,
+      "captureRate": {
+        "successes": 27,
+        "n": 1593,
+        "rate": 0.01694915254237288,
+        "low": 0.011674266945839553,
+        "high": 0.024548236275519407
+      },
+      "files": 105,
+      "bytes": 416203036
+    },
+    {
+      "reason": "parse-failure",
+      "captures": 22,
+      "captureRate": {
+        "successes": 22,
+        "n": 1593,
+        "rate": 0.013810420590081607,
+        "low": 0.00913767020312612,
+        "high": 0.020822471115837515
+      },
+      "files": 133,
+      "bytes": 724796
+    },
+    {
+      "reason": "too-large",
+      "captures": 20,
+      "captureRate": {
+        "successes": 20,
+        "n": 1593,
+        "rate": 0.012554927809165096,
+        "low": 0.008141906619879326,
+        "high": 0.019313289938126175
+      },
+      "files": 23,
+      "bytes": 408883207
+    },
+    {
+      "reason": "parser-limit",
+      "captures": 0,
+      "captureRate": {
+        "successes": 0,
+        "n": 1593,
+        "rate": 0,
+        "low": 0,
+        "high": 0.002405748948424189
+      },
+      "files": 0,
+      "bytes": 0
+    }
+  ],
+  "heldOut": {
+    "data": {
+      "files": 16778,
+      "bytes": 451869002
+    },
+    "sourcemap": {
+      "files": 148040,
+      "bytes": 1312346234
+    },
+    "docs": {
+      "files": 17448,
+      "bytes": 189843814
+    },
+    "typed-source": {
+      "files": 249126,
+      "bytes": 639176289
+    },
+    "asset": {
+      "files": 23085,
+      "bytes": 957831322
+    },
+    "other": {
+      "files": 12174,
+      "bytes": 1181559256
+    }
+  },
+  "shipsOpaqueExecutable": {
+    "successes": 367,
+    "n": 1593,
+    "rate": 0.23038292529817953,
+    "low": 0.21036815947250231,
+    "high": 0.25169495311173895
+  },
+  "confirmedMalicious": [
+    {
+      "package": "kit-hydration-vim",
+      "version": "1.0.0",
+      "capturedAt": "2026-08-15T02:21:04.023Z",
+      "ngpackPath": "norte-guard-captures/captures/kit-hydration-vim@1.0.0_1786760463830",
+      "label": "confirmed_malicious",
+      "executableBytes": 68568,
+      "executableFiles": 4,
+      "coveredBytes": 4952,
+      "coveredFiles": 3,
+      "coverage": 0.0722202776805507,
+      "byReason": {
+        "native-binary": {
+          "files": 1,
+          "bytes": 63616
+        }
+      },
+      "heldOut": {
+        "other": {
+          "files": 1,
+          "bytes": 1056
+        },
+        "data": {
+          "files": 1,
+          "bytes": 674
+        },
+        "docs": {
+          "files": 1,
+          "bytes": 1219
+        },
+        "typed-source": {
+          "files": 2,
+          "bytes": 870
+        }
+      },
+      "files": []
+    },
+    {
+      "package": "svelte-goal-vim",
+      "version": "1.0.0",
+      "capturedAt": "2026-08-15T02:21:26.307Z",
+      "ngpackPath": "norte-guard-captures/captures/svelte-goal-vim@1.0.0_1786760486110",
+      "label": "confirmed_malicious",
+      "executableBytes": 4371,
+      "executableFiles": 3,
+      "coveredBytes": 4371,
+      "coveredFiles": 3,
+      "coverage": 1,
+      "byReason": {},
+      "heldOut": {
+        "other": {
+          "files": 1,
+          "bytes": 1056
+        },
+        "data": {
+          "files": 1,
+          "bytes": 739
+        },
+        "docs": {
+          "files": 1,
+          "bytes": 1089
+        },
+        "typed-source": {
+          "files": 2,
+          "bytes": 869
+        }
+      },
+      "files": []
+    }
+  ]
+}

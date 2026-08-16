@@ -130,3 +130,104 @@ days are gzipped.
 
 If the feed fails repeatedly the watcher degrades to RSS and says so in a box
 that explains what that costs.
+
+## `analyzability` — what can be looked at at all
+
+Runs before any detector, offline, over the `.ngpack` captures already on disk.
+It **detects nothing**. It measures how much of a package a static analyser can
+read, because every detector this project has reports PASS on what it could not
+read — the correct default for a gate, and a lie about coverage unless somebody
+publishes the size of the blind spot.
+
+```bash
+norte-guard analyzability                # the whole corpus
+norte-guard analyzability --sample=500   # confirmed_malicious always included
+norte-guard analyzability --capture=<pkg>  # one package, per-file reasons
+norte-guard analyzability --metrics      # re-derive the minification threshold
+```
+
+**The denominator is bytes that execute.** JavaScript, native binaries, WASM,
+V8 bytecode and foreign scripts. Documentation, images, fonts, source maps and
+`.ts` sources ship alongside what runs and are not what runs; they are held out
+and printed under their own heading so the exclusion can be argued with rather
+than taken on trust.
+
+**What a file is, is decided by its bytes.** Sniffing 200 tarballs from the
+corpus found 41 files with no extension at all that were Mach-O or ELF
+executables, carrying 847 MB — more than every `.js` file in the sample put
+together. And in a package this project has labelled `confirmed_malicious`,
+`dist/internal/calc.dat` is 63,616 bytes beginning `\x7fELF`: 93% of that
+package's executable surface, wearing a data file's extension. A name-based
+classifier holds it out of the denominator and reports the package as fully
+covered.
+
+**Fail closed.** A file counts as covered only if it parses, is legible, and
+contains no construct that moves behaviour out of the parser's reach. One
+`eval()` of a runtime-built string makes the whole file uncovered — not 95%
+covered — because the parser cannot bound what the rest of it does. Being wrong
+in that direction costs a pessimistic number; being wrong in the other is the
+failure the command exists to prevent.
+
+**A file carries every reason that applies.** A minified bundle with a dynamic
+`require` appears under both, so the per-reason columns overlap and do not sum to
+the uncovered total. They are a prevalence table, never a partition.
+
+**Three failures that look alike and are not.** A file that defeats a conforming
+parser is broken or built to be, and that is the severe one. A `.js` that is
+really TypeScript, JSON or HTML is a packaging habit. And acorn's own recursion
+guard gives up on a deeply nested expression past roughly ten thousand terms —
+a limit of this tool, not a property of the package. They get `parse-failure`,
+`not-javascript` and `parser-limit` respectively; all three are uncovered,
+because nobody read the file either way.
+
+### The minification threshold is derived, not chosen
+
+`--metrics` writes every candidate metric for every parsed file and checks the
+current cut against the files that label themselves. The constants in
+`analyzability.ts` are the **antimode** of their own distribution, measured over
+28,519 parsed files from 700 captures on 2026-08-16:
+
+```
+shortIdentifierRatio    5,592 files at 0.00-0.05, 12,933 at 0.65-0.70,
+                        minimum of the valley at 0.500 holds 46
+bytesPerLine            4,786 files at 20-40, 7,245 at 400-600,
+                        minimum of the valley at 130 holds 15
+```
+
+Checked a second way, because the first way could have been five packages: five
+of the 182 packages hold **52.9%** of those files, so a file-weighted histogram is
+largely a picture of whoever ships the most files. Re-derived with one vote per
+package, on each package's median, the valley at 100–120 bytes per line holds
+**zero** packages and the valley at 0.25–0.30 holds one. The same cut sits in an
+empty region under both weightings, and that is the evidence — not the shape of
+either histogram alone.
+
+The choice is also insensitive across the whole valley: every cut from
+`(100, 0.40)` to `(200, 0.50)` catches the same 12 of the 14 unambiguous
+`*.min.js` files and fires on 1.1%–1.7% of the readable ones. It barely matters
+where in an empty valley the line falls, because nothing lives there.
+
+What the cut then says — both true, and very different:
+
+| | |
+|---|---|
+| parsed JavaScript **files** that are minified | 64.6% |
+| **packages** shipping at least one minified file | 14.8% |
+| **packages** minified in the majority of their files | 6.0% |
+
+The command reports the package-weighted figure, because "what fraction of new
+npm packages ships unreadable code" is a question about packages.
+
+Two conditions, not one, and both must hold. A generated-but-readable lookup
+table has short identifiers and short lines; a hand-written file with one inlined
+data blob has an enormous line and ordinary names. Requiring the layout **and**
+the renaming to agree keeps both out — and it is why one of the two `*.min.js`
+misses is a file whose mean line is 2,189 bytes but whose identifiers average 7.2
+characters. That is a data blob, not renamed code, and the second condition
+declines it on purpose.
+
+The self-labelled set has a bias worth stating: `*.min.js` is unambiguous but
+rare (14 files), and `sourceMappingURL` turned out to label **readable**
+transpiled output rather than minified output — its files have a median
+`bytesPerLine` of 40 against 384 for everything else. It is used as the negative
+set for that reason, and the positives carry the whole weight of the check.

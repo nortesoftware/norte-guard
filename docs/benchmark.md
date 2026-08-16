@@ -6,10 +6,10 @@
 norte-guard bench
 
 non-PASS gate 0.60% (95% Wilson CI: 0.20%-1.75%, n=500)
-              BLOCK 1 (0.20%, exit 1) - WARN 2 (0.40%, exit 0)
-unevaluated   22.20% (95% Wilson CI: 18.78%-26.05%, n=500)
+              BLOCK 0 (0.00%, exit 1) - WARN 3 (0.60%, exit 0)
+unevaluated   23.00% (95% Wilson CI: 19.53%-26.89%, n=500)
               INSUFFICIENT_HISTORY: informational, exit 0, does not fail the build
-              source: fp-bench-results/2026-08-16-v1.1.0-2.json (stratified, engine v1.1.0)
+              source: fp-bench-results/2026-08-16-v1.2.0.json (stratified, engine v1.2.0)
               the fabricated-profile rule has no candidate in this sample
 Recall        0.00% (95% Wilson CI: 0.00%-32.44%, n=8) - 0/8 confirmed_malicious
               the fabricated-profile rule is opt-in and was off for this run, so
@@ -124,8 +124,17 @@ criterion. The eight are removals of packages the *filter* kept; whether the
 download count and npm serves one complete week at a time.
 
 So each record now declares which criterion it is evidence for — `rule-matched`,
-`rule-cleared` or `unverifiable` — and the promotion criterion counts only
-removals the rule itself would have caused.
+`vacuous-zero`, `rule-cleared` or `unverifiable` — and the promotion criterion
+counts only removals the rule itself would have caused.
+
+The fourth state is not a refinement. npm answers **404** for a package published
+minutes ago, which is what this class is made of, and `downloads.ts` reads that as
+zero because for a verdict it is one. Checked against the live endpoint: three of
+four freshly published quarantine names return 404, and `async-critical-section`
+returns a genuine zero over a week that closed four days before it was published.
+Graded as a match, a restarted collector would clear the three-removal promotion
+bar out of three 404s inside a day — the same mistake one level down. A zero over
+a window the package was not alive for is arithmetic, and it promotes nothing.
 
 **The criterion also has to survive being read early.** npm removes a fabricated
 package within hours, so every true positive arrives on day one. A false positive
@@ -196,6 +205,141 @@ The sample is assumed clean and never verified. A compromised package inside it
 would be counted as a false positive while being a hit, so the reported rate is
 an upper bound on the error, not a measurement of it. That declaration ships in
 the output and in the saved artifact.
+
+## Analyzability — the size of the blind spot
+
+`norte-guard analyzability`, measured over the whole corpus on 2026-08-16, engine
+v1.2.0: 1,593 captures, ~20 minutes, offline.
+
+**The first result is about the corpus, not the detector.**
+
+| | |
+|---|---|
+| uncontaminated captures | 4,855 |
+| still holding their tarball | 1,593 |
+| **no tarball bytes left** | **3,262 (67.19%)** |
+| confirmed_malicious with bytes | 2 of 8 |
+
+Two thirds of what this project calls its corpus is a manifest and a packument
+with nothing behind them, and six of the eight confirmed attack samples are among
+them. Nothing reported it for weeks because layer 1 analyses the packument and
+never asks for the artifact, so a capture whose bytes are gone analyses exactly
+like one that still has them. `hasTarball` on `CorpusSample` meant "the manifest
+declares a version" and was read as "the bytes are here"; `tarballPresent` is the
+one that checks.
+
+**Where the bytes went, and it is a bug.** Four hypotheses were tested against
+the ledger the object store keeps:
+
+| | |
+|---|---|
+| distinct objects ever written | 4,237 |
+| gone from disk | **3,169 (9.2 GB)** |
+| on disk but absent from the ledger | 0 |
+
+Every capture without bytes declares `objects: {version: hash}` in its manifest,
+and `createNgpack` writes that field only after `putObject` has returned — so the
+bytes were stored, every time. That rules out the three capture-time
+explanations: a streaming mode that keeps only a file list, a daily budget that
+runs out and keeps writing metadata, and a silent download failure. It also rules
+out the quarantine policy: `quarantine-no-genome` keeps **33.5%** of its bytes
+and `watcher-threshold` keeps **33.7%**, which is the same number, so nothing
+about quarantine is deciding this.
+
+The loss is a single event, not attrition:
+
+| day objects were written | written | gone | survived |
+|---|---|---|---|
+| 2026-08-12 | 610 | 610 | 0 |
+| 2026-08-13 | 1,761 | 1,761 | 0 |
+| 2026-08-14 | 798 | 798 | 0 |
+| 2026-08-15 | 883 | 0 | 883 |
+| 2026-08-16 | 185 | 0 | 185 |
+
+Everything the store held before 2026-08-15 is gone and everything after it
+survives. Rotation deletes oldest-first until it is under a cap and would have
+left a partial day; this left none. The 30 oldest captures, which predate the
+object store and hold their tarballs inline, are at **100%** — so it is the store
+that was emptied, not the captures. `deleteObject` and `listObjects` did not
+exist before commit `25d590b` (2026-08-14 23:32), which falls inside the window
+between the last deleted write and the first surviving one.
+
+Both deleters protect what a manifest references, so the arithmetic was not
+wrong: the reference set came back empty or near-empty and the loop believed it.
+`collectOrphanObjects` now refuses outright when more than half the store looks
+unreferenced, and says so, because that is the shape of a scan that could not read
+the captures rather than of a store full of orphans — and this store is the only
+copy, since npm removes these packages within hours.
+
+**Coverage of the executable surface**, over the 1,593 that can be read:
+
+| | |
+|---|---|
+| by bytes | **9.21%** |
+| median capture | **100.00%** |
+| fully covered | 921 |
+| nothing covered at all | 123 |
+
+Those two headline numbers disagree by a factor of ten and both are correct. The
+byte figure is dominated by 10.9 GB of native binaries in 848 files; the median
+is one vote per package, and most packages are a handful of small readable
+modules. Neither replaces the other, and quoting one as "coverage" without the
+other is the error the pair exists to prevent.
+
+```
+0%        123      0-50%  269      50-90%  90      90-99.9%  72      100%  921
+```
+
+**Why the rest is not covered.** Captures with at least one such file; a file
+carries every reason that applies, so the columns overlap and are not a
+partition:
+
+| reason | captures | files | bytes |
+|---|---|---|---|
+| minified | 12.18% (10.66–13.88) | 122,779 | 760.9 MB |
+| dynamic-require | 11.11% (9.66–12.75) | 626 | 210.2 MB |
+| native-binary | 9.86% (8.49–11.42) | 848 | 10,886.5 MB |
+| foreign-script | 9.42% (8.08–10.95) | 3,646 | 36.2 MB |
+| dynamic-eval | 7.34% (6.16–8.73) | 327 | 328.5 MB |
+| not-javascript | 2.26% (1.64–3.11) | 52 | 0.5 MB |
+| bytecode | 1.95% (1.37–2.75) | 31 | 480.1 MB |
+| wasm | 1.69% (1.17–2.45) | 105 | 416.2 MB |
+| parse-failure | 1.38% (0.91–2.08) | 133 | 0.7 MB |
+| too-large | 1.26% (0.81–1.93) | 23 | 408.9 MB |
+
+**The question as asked — what fraction of new npm packages ships a binary, WASM,
+bytecode or unreadable minified code:**
+
+> **23.04%** (95% Wilson CI: 21.04%–25.17%, n=1,593)
+
+Close to a quarter of the publish stream carries something layer 1 cannot read at
+all. That is the ceiling to declare before building on top of it.
+
+`foreign-script` was 795 files until a shell script with no `#!` line was found
+to be falling out of the denominator as "other". An install script is the most
+direct way a package runs code on a machine, so the extension counts as well as
+the shebang, and 2,851 more executable files came into view. A held-out file is
+invisible twice over: it is neither covered nor a reason.
+
+**Parse failure is 1.38%, and it is the number that most needed splitting.**
+A file that defeats a conforming parser is broken or built to be. A `.js` that is
+really TypeScript, JSON or HTML is a packaging habit — `not-javascript`, 2.26%.
+And acorn's own recursion guard gives up past roughly ten thousand nested terms,
+which is a limit of this tool and not a property of the package —
+`parser-limit`. Collapsing the three would have reported the second and third as
+adversarial on the first run.
+
+**The eight confirmed samples.** Six have no bytes. Of the two that remain,
+`svelte-goal-vim@1.0.0` is fully covered — three small `.mjs` files — and
+`kit-hydration-vim@1.0.0` is **7.22%** covered, because
+`package/dist/internal/calc.dat` is 63,616 bytes beginning `\x7fELF`. It is 93%
+of that package's executable surface, and it is wearing a data file's extension.
+A classifier that read the name would have held it out of the denominator and
+called the package fully covered.
+
+So: **1 of 2 analysable, and 1 of 8 in total.** The approach is not dead for this
+class, but the corpus can only answer the question for a quarter of it, and the
+reason is lost artifacts rather than obfuscation.
 
 ## Drift
 
