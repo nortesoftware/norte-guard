@@ -49,18 +49,33 @@ export class RegistrySource implements PackageSource {
     const meta = packument.versions[version]
     if (!meta) throw new Error(`Version ${version} not found for ${name}`)
 
-    return downloadBuffer(meta.dist.tarball)
+    return downloadTarball(meta.dist.tarball)
   }
 }
 
 export const defaultSource = new RegistrySource()
 
-function downloadBuffer(url: string): Promise<Buffer> {
+// Exported because a caller that already holds the packument should not fetch it
+// again to learn a URL it is looking at, and because the two copies can disagree
+// when a package is being republished or taken down while the run is going.
+export function downloadTarball(url: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
       headers: { 'User-Agent': 'norte-guard/0.1.0' },
       timeout: 30_000,
     }, res => {
+      // A 404 body is bytes, and without this check they were being handed back
+      // as a tarball: stored under their own hash by the capture path, and read
+      // as an archive with no members by the analysis path. Both report a
+      // package with nothing in it, which is the wrong answer to "did this
+      // download work" and reads downstream as a finding about the package.
+      const status = res.statusCode ?? 0
+      if (status >= 400) {
+        res.resume()
+        reject(new Error(`HTTP ${status}: ${url}`))
+        return
+      }
+
       const chunks: Buffer[] = []
       res.on('data', (c: Buffer) => chunks.push(c))
       res.on('end', () => resolve(Buffer.concat(chunks)))

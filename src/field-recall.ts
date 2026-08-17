@@ -499,7 +499,7 @@ function observationFromCapture(pkg: string, captures: CorpusSample[]): Takedown
 // The live day plus every rotated one, newest content last. Gzip is decompressed
 // in memory: a day compresses to roughly a tenth, and the alternative is losing
 // the history the moment rotation runs.
-function readChangeLogs(outputDir: string): string[] {
+export function readChangeLogs(outputDir: string): string[] {
   const texts: string[] = []
   let names: string[]
   try { names = readdirSync(outputDir) } catch { return texts }

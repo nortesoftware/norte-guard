@@ -231,3 +231,108 @@ rare (14 files), and `sourceMappingURL` turned out to label **readable**
 transpiled output rather than minified output — its files have a median
 `bytesPerLine` of 40 against 384 for everything else. It is used as the negative
 set for that reason, and the positives carry the whole weight of the check.
+
+### Cutting the corpus by class, and why that cut cannot answer the question
+
+```bash
+norte-guard analyzability --by-class --since=2026-08-15 --sample=250
+```
+
+Splits the corpus by `captureReason` and reports coverage, non-coverage reasons
+and reachable modules for each segment. On 2026-08-16, v1.2.1, one day of
+captures:
+
+| | quarantine-no-genome | watcher-threshold |
+|---|---|---|
+| coverage by bytes | **93.32%** | **9.79%** |
+| coverage, median package | 100.00% | 45.13% |
+| ships a native binary | 0.00% | 16.00% |
+| minified | 2.40% | 34.80% |
+| reaches `child_process` | 17.14% | 36.87% |
+
+Read as a finding about the class, every row of that table is wrong, and the
+reason is arithmetic. **The class is defined as "under 100KB unpacked."** A
+native binary, a WASM module, a V8 bytecode cache and a webpack bundle do not
+fit in 100KB — so the first column cannot contain them whatever the class is
+really like. The second column is selected on a high score, which is enriched
+for install scripts and native addons by construction. The module row inverts
+for the same reason: bigger software reaches more modules, and `child_process`
+appearing *less* often inside the class is what that looks like.
+
+The command says so in its own output, and it is still the wrong comparison to
+be printing.
+
+### `--size-control` — the comparison that answers it
+
+```bash
+norte-guard analyzability --size-control --since=2026-08-15 --draw=200
+```
+
+Holds size fixed and varies the class definition **one conjunct at a time**. The
+class is four conditions:
+
+```
+no genome  AND  name under 7 days  AND  under 100KB  AND  no repository
+```
+
+Every group is under 100KB, drawn from the same window, and matched to the
+class's own size distribution decile by decile:
+
+| cell | differs from the class in |
+|---|---|
+| `class` | — |
+| `class +repository` | it has a `repository` field |
+| `class +age` | its name is 7 days old or more |
+| `maintained` | genome, age and repository all differ |
+
+There is no young-with-genome cell and its absence is a fact about the
+definitions, not a gap in the draw: a genome needs ten versions across ninety
+days, so a package with one cannot have a name younger than a week.
+
+**Where the groups come from.** The class is measured twice. Once from the
+captures on disk, which is a *census* of the class in the window rather than a
+sample of it. Once from `changes-log.ndjson` — which records the class markers
+for **every** publication the watcher scored, not only the captured ones —
+re-fetched from npm now. The three control cells come the second way only,
+because nothing on disk selected them.
+
+Measuring the class both ways is not redundancy. A package npm has removed
+cannot be fetched, and the class is the population npm removes; the gap between
+the two class rows is the size of that survivorship problem, measured instead of
+apologised for.
+
+**What the flags do.**
+
+```
+--since=<YYYY-MM-DD>   required; both sides on one window or the comparison is
+                       between weeks
+--until=<ISO>          the far end, when a run has to be reproduced exactly
+--draw=<n>             packages to draw and fetch PER CELL. 0 does no network at
+                       all and leaves only the on-disk comparison, which is not
+                       size-matched and says so
+--output=<dir>         where changes-log.ndjson lives (default
+                       ./norte-guard-captures)
+--results-dir=<dir>    where the artifact lands
+```
+
+Requests are one packument and one tarball per package, spaced by 100ms
+whatever the outcome — including the failures, so the rate does not go up
+exactly when a cell is being taken down.
+
+**What it prints, and what to check first.** The `DID THE MATCH WORK` table
+profiles every group inside the **class's** deciles, never inside its own. A
+table where each column is cut at its own quantiles reads as a perfect match
+whatever the sizes are, and it is the only check that the control worked.
+
+**The rule is declared before the run.** A difference is reported as real only
+when the 95% interval on the *difference* excludes zero — Newcombe's hybrid
+score method, because two overlapping error bars can still hide a difference
+that excludes zero. "No difference" is a claim, not a shrug: it is printed only
+when the whole interval lies inside a ±10pp equivalence margin. Otherwise the
+verdict is `INCONCLUSIVE at this n`, which is what a small control group
+deserves and what affirming the null from 68 packages would otherwise look like.
+
+Module differences are in the same table with intervals widened by Bonferroni
+for the number of modules compared. Picking the largest row of a forty-row table
+and reading a 95% interval off it is how the `child_process` claim was made in
+the first place.

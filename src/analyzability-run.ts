@@ -6,7 +6,9 @@
 
 import { NgpackSource } from './ngpack.js'
 import { loadCorpus, type CorpusSample } from './corpus.js'
-import { readTar, DEFAULT_TAR_LIMITS, type TarLimits } from './tarball.js'
+import { readTar, DEFAULT_TAR_LIMITS, type TarLimits, type TarReadResult } from './tarball.js'
+import { classifyFile } from './file-kind.js'
+import { analyzePackage } from './reachability.js'
 import { rateWithCI, type RateWithCI } from './stats.js'
 import {
   analyzeFile,
@@ -57,15 +59,29 @@ export function analyzeCapture(
     return empty(`archive unreadable: ${archive.truncationReason}`)
   }
 
+  return analyzeArchive(sample, archive, options.threshold, options.keepFiles)
+}
+
+// The file-level pass over an archive already in hand, so a caller that needs
+// the same bytes for a second question does not read them again.
+export function analyzeArchive(
+  sample: CorpusSample,
+  archive: TarReadResult,
+  threshold?: LegibilityThreshold,
+  keepFiles = false
+): CaptureAnalyzability {
+  const base = {
+    package: sample.package,
+    version: sample.version,
+    capturedAt: sample.capturedAt,
+    ngpackPath: sample.ngpackPath,
+    label: sample.label,
+  }
+
   const packageType = packageTypeOf(archive.entries)
 
   const files: FileAnalysis[] = archive.entries.map(entry =>
-    analyzeFile({
-      name: entry.name,
-      data: entry.data,
-      packageType,
-      threshold: options.threshold,
-    })
+    analyzeFile({ name: entry.name, data: entry.data, packageType, threshold })
   )
 
   // A member the reader refused is a member nobody analysed, and it is counted
@@ -87,7 +103,7 @@ export function analyzeCapture(
   return {
     ...base,
     ...summary,
-    files: options.keepFiles ? files : [],
+    files: keepFiles ? files : [],
     error: archive.truncated ? `archive truncated: ${archive.truncationReason}` : undefined,
   }
 }
@@ -443,4 +459,276 @@ export function checkThreshold(rows: MetricRow[], threshold: LegibilityThreshold
     truePositiveRate: labelled.length > 0 ? labelled.filter(hits).length / labelled.length : null,
     falsePositiveRate: unlabelled.length > 0 ? unlabelled.filter(hits).length / unlabelled.length : null,
   }
+}
+
+// ---------------------------------------------------------------------------
+// The corpus, cut by class
+// ---------------------------------------------------------------------------
+
+// Whether the class the capture filter selects is systematically more readable
+// than the rest of the stream. If it is, that is a signal on its own and it cost
+// nothing to find: a real package ships binaries and minified bundles, and one
+// fabricated in a hurry is small flat JavaScript.
+//
+// Descriptive only. Nothing here decides that a segment is malicious, and
+// nothing scores. A rate that separates two populations is a fact about the
+// populations; turning it into a verdict needs confirmed samples, and this
+// corpus has two with bytes.
+export interface SegmentReport {
+  segment: string
+  // Declared BEFORE any rate computed over the segment, because 3,169 objects
+  // were deleted from the store and the loss is not evenly spread across the
+  // classes: a segment whose bytes are mostly gone is a segment whose rates are
+  // drawn from whatever survived, and that is not a random sample of it.
+  capturesTotal: number
+  capturesWithBytes: number
+  bytesShare: RateWithCI
+  oldestCapturedAt: string | null
+  newestCapturedAt: string | null
+  // Survivors by capture day. The loss is not symmetric between the classes and
+  // this is where that shows: the pre-object-store captures kept their tarballs
+  // inline and survived the wipe, and they are disproportionately one segment.
+  // Comparing two segments whose survivors come from different weeks compares
+  // the weeks.
+  survivorsByDay: Array<{ day: string; captures: number }>
+
+  analysed: number
+  nothingExecutable: number
+  byteCoverage: number | null
+  medianCaptureCoverage: number | null
+  distribution: CoverageBucket[]
+  reasons: ReasonPrevalence[]
+
+  // Captures whose entry points could be resolved and followed at all. The
+  // module rates below are over THIS, not over `analysed`: a package with no
+  // readable entry point reaches nothing as far as anyone can tell, and putting
+  // it in the denominator would report reticence as safety.
+  reachabilityAnalysed: number
+  modules: ModulePrevalence[]
+  lostTrails: number
+}
+
+export interface ModulePrevalence {
+  module: string
+  captures: number
+  rate: RateWithCI
+}
+
+// `node:fs` and `fs` are one module. Comparing segments without folding them
+// would split every builtin down whichever import style each package happened to
+// use, and the whole point is to compare across packages.
+export function canonicalModule(specifier: string): string {
+  const bare = specifier.startsWith('node:') ? specifier.slice(5) : specifier
+  // A subpath is the same package: `lodash/get` reaches lodash.
+  if (bare.startsWith('@')) {
+    const parts = bare.split('/')
+    return parts.slice(0, 2).join('/')
+  }
+  return bare.split('/')[0] ?? bare
+}
+
+export interface SegmentedOptions {
+  roots?: string[]
+  threshold: LegibilityThreshold
+  engineVersion: string
+  sample?: number
+  limits?: TarLimits
+  // Restricts every segment to captures taken on or after this day. The point is
+  // not recency: a comparison between segments whose survivors are drawn from
+  // different date ranges is a comparison of the dates.
+  since?: string
+  onProgress?: (done: number, total: number) => void
+  now?: () => string
+}
+
+export interface SegmentedReport {
+  since: string | null
+  ranAt: string
+  engineVersion: string
+  threshold: LegibilityThreshold
+  corpusTotal: number
+  corpusWithBytes: number
+  segments: SegmentReport[]
+}
+
+export function runSegmentedAnalyzability(options: SegmentedOptions): SegmentedReport {
+  const corpus = loadCorpus(options.roots)
+  const uncontaminated = corpus.samples.filter(s =>
+    !s.contaminated && (!options.since || s.capturedAt >= options.since)
+  )
+
+  // Three segments, and a capture can be in two of them: the confirmed ones are
+  // also quarantine captures. Overlap is correct here — they answer different
+  // questions — and each segment states its own denominator.
+  const segments: Array<{ name: string; members: CorpusSample[] }> = [
+    {
+      name: 'quarantine-no-genome',
+      members: uncontaminated.filter(s => s.captureReason === 'quarantine-no-genome'),
+    },
+    {
+      name: 'watcher-threshold',
+      members: uncontaminated.filter(s => s.captureReason === 'watcher-threshold'),
+    },
+    {
+      name: 'confirmed_malicious',
+      members: uncontaminated.filter(s => s.label === 'confirmed_malicious'),
+    },
+  ]
+
+  const reports: SegmentReport[] = []
+  let done = 0
+
+  // Selected up front so the progress denominator is the work about to be done
+  // rather than the work a full pass would have been: with --sample=250 the old
+  // one counted every capture with bytes, so a finished run reported 502/2030
+  // and read as a pass that had died two thirds of the way through.
+  const selections = segments.map(segment => {
+    const withBytes = segment.members.filter(s => s.tarballPresent)
+    return {
+      segment,
+      withBytes,
+      selected: options.sample && options.sample < withBytes.length
+        ? stratifiedSample(withBytes, options.sample, [])
+        : withBytes,
+    }
+  })
+  const totalWork = selections.reduce((n, s) => n + s.selected.length, 0)
+
+  for (const { segment, withBytes, selected } of selections) {
+
+    const results: CaptureAnalyzability[] = []
+    const moduleCaptures = new Map<string, number>()
+    let reachabilityAnalysed = 0
+    let lostTrails = 0
+
+    for (const sample of selected) {
+      // One read of the tarball, two questions asked of it. Reading it twice was
+      // the obvious way to write this and doubled the wall clock of a pass that
+      // is already the slow part.
+      const tarball = readTarballOf(sample)
+      const archive = typeof tarball === 'string'
+        ? null
+        : readTar(tarball, options.limits ?? DEFAULT_TAR_LIMITS)
+
+      results.push(archive
+        ? analyzeArchive(sample, archive, options.threshold)
+        : analyzeCapture(sample, { threshold: options.threshold, limits: options.limits }))
+
+      const reach = archive ? reachableModulesOf(archive) : null
+      if (reach) {
+        reachabilityAnalysed++
+        lostTrails += reach.lost
+        for (const module of reach.modules) {
+          moduleCaptures.set(module, (moduleCaptures.get(module) ?? 0) + 1)
+        }
+      }
+
+      done++
+      options.onProgress?.(done, totalWork)
+    }
+
+    const summary = summariseCorpus(results, {
+      threshold: options.threshold,
+      engineVersion: options.engineVersion,
+      ranAt: '',
+      confirmedPackages: new Set<string>(),
+    })
+
+    const dates = segment.members.map(s => s.capturedAt).filter(Boolean).sort()
+    const byDay = new Map<string, number>()
+    for (const m of withBytes) {
+      const day = m.capturedAt.slice(0, 10)
+      byDay.set(day, (byDay.get(day) ?? 0) + 1)
+    }
+
+    reports.push({
+      segment: segment.name,
+      capturesTotal: segment.members.length,
+      capturesWithBytes: withBytes.length,
+      bytesShare: rateWithCI(withBytes.length, segment.members.length),
+      oldestCapturedAt: dates[0] ?? null,
+      newestCapturedAt: dates[dates.length - 1] ?? null,
+      survivorsByDay: [...byDay.entries()]
+        .map(([day, captures]) => ({ day, captures }))
+        .sort((a, b) => a.day.localeCompare(b.day)),
+      analysed: summary.analysed,
+      nothingExecutable: summary.nothingExecutable,
+      byteCoverage: summary.byteCoverage,
+      medianCaptureCoverage: summary.medianCaptureCoverage,
+      distribution: summary.distribution,
+      reasons: summary.reasons,
+      reachabilityAnalysed,
+      lostTrails,
+      modules: [...moduleCaptures.entries()]
+        .map(([module, captures]) => ({
+          module,
+          captures,
+          rate: rateWithCI(captures, reachabilityAnalysed),
+        }))
+        .sort((a, b) => b.captures - a.captures),
+    })
+  }
+
+  return {
+    since: options.since ?? null,
+    ranAt: options.now ? options.now() : new Date().toISOString(),
+    engineVersion: options.engineVersion,
+    threshold: options.threshold,
+    corpusTotal: uncontaminated.length,
+    corpusWithBytes: uncontaminated.filter(s => s.tarballPresent).length,
+    segments: reports,
+  }
+}
+
+// The A1/A2 mechanic over one archive. Null when there was nothing to follow —
+// no readable JavaScript, or no entry point that resolves to a file in the
+// package. Those stay OUT of the reachability denominator: a package this
+// analysis could not enter reaches nothing only in the sense that nobody looked,
+// and counting it as one that reaches nothing reports reticence as safety.
+export function reachableModulesOf(
+  archive: TarReadResult
+): { modules: Set<string>; lost: number } | null {
+  if (archive.entries.length === 0) return null
+
+  // Every JavaScript source held as a string at once, which is the memory
+  // profile of this function and the reason it has a bound. A single capture in
+  // this corpus ships 4,197 parseable files; decoding all of them and then
+  // parsing each is what took the pass down with SIGABRT. Beyond the bound the
+  // capture is NOT followed and NOT counted, which keeps it out of the
+  // reachability denominator instead of contributing a zero.
+  // Sized down twice, from measurement rather than taste. The first bound
+  // (1,500 files / 48MB) still died, and to SIGKILL rather than a heap error:
+  // the sources are not the cost, the syntax trees built from them are, and they
+  // are an order of magnitude larger than the text. These are what a full pass
+  // survives on this machine.
+  const MAX_SOURCE_FILES = 600
+  const MAX_SOURCE_BYTES = 16 * 1024 * 1024
+
+  const files = new Map<string, string>()
+  let packageJson: unknown = {}
+  let root = 'package'
+  let sourceBytes = 0
+
+  for (const entry of archive.entries) {
+    const kind = classifyFile(entry.name, entry.data.subarray(0, 256)).kind
+    if (kind === 'javascript') {
+      sourceBytes += entry.size
+      if (files.size >= MAX_SOURCE_FILES || sourceBytes > MAX_SOURCE_BYTES) return null
+      files.set(entry.name, entry.data.toString('utf-8'))
+    }
+    if (/^[^/]+\/package\.json$/.test(entry.name)) {
+      root = entry.name.split('/')[0] ?? 'package'
+      try { packageJson = JSON.parse(entry.data.toString('utf-8')) } catch { /* leave it */ }
+    }
+  }
+
+  if (files.size === 0) return null
+
+  const result = analyzePackage({ files, packageJson, root })
+  if (result.entryPoints.length === 0) return null
+
+  const modules = new Set<string>()
+  for (const r of result.reachable) modules.add(canonicalModule(r.module))
+
+  return { modules, lost: result.lost.length }
 }

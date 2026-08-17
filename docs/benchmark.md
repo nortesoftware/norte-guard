@@ -341,6 +341,128 @@ So: **1 of 2 analysable, and 1 of 8 in total.** The approach is not dead for thi
 class, but the corpus can only answer the question for a quarter of it, and the
 reason is lost artifacts rather than obfuscation.
 
+## A 2.4MB package that costs 2.2GB to analyse
+
+The corpus pass kept dying. `analyzability --by-class --since=2026-08-15
+--sample=250` ended in `FATAL ERROR: Ineffective mark-compacts near heap limit`
+— on a 4GB machine, with an input the tar reader had already bounded.
+
+**The capture.** `@async23/chrome-devtools-mcp@1.7.0`: a 2.4MB tarball, 13.2MB
+unpacked, 337 files, of which 75 are JavaScript totalling 12.8MB. The
+reachability pass bounds itself at 600 files and 16MB of source, so it accepted
+this one. Two files carry it: `third_party/index.js` at **7.45MB** and a
+Lighthouse bundle at 3.89MB.
+
+**It is not the syntax tree.** Measured one file per process: the 7.45MB file
+parses to a **213MB** tree with `locations: true`, 28.6× its source. Large, and
+nowhere near a heap limit.
+
+**It is the lost-trail list.** `merge()` in `reachability.ts` unions two Values.
+Its `origins` half deduplicates by key and stops at 64 — a fix made earlier,
+after a different crash, and documented in a comment right above the function.
+Its `lost` half did neither: it appended, on every union, with no dedup and no
+cap. A value that loses its trail once and then flows through a chain of
+assignments and calls carries a copy per route, and the copies compound. On this
+file:
+
+| | |
+|---|---|
+| lost points actually emitted | 14,853 |
+| distinct `(reason, line)` pairs among them | 3,744 |
+| entries in the array at the end | **35,110,656** |
+| merges, and entries they copied between them | 210,699 / 125,721,046 |
+| largest single merge | 2,271,170 entries |
+
+Bisected to the statement: slicing the file at top-level statement boundaries,
+the analysis costs 236MB of heap through statement 4,650 and dies past
+statement 4,700 — the 127KB in between is a combinator library, where the same
+values flow through thousands of call sites. Growth is not gradual. It is
+roughly a doubling per statement across that stretch.
+
+**The fix is the one the comment above `originKey` already describes**, applied
+to the other half: dedup by `(reason, file, line, detail)`, cap the per-value
+list at 64 and the per-module list at 2,000. Deduplication here is lossless —
+two lost points with the same reason, file, line and detail are the same fact
+recorded twice. Afterwards the same capture analyses in **13 seconds and 118MB**,
+with 41 reachable modules and 2,858 lost trails, and the full `--sample=250` pass
+completes.
+
+**It is a denial-of-service vector against any static analyser of npm, not just
+this one.** 2.4MB of download, published by anyone, forces gigabytes in a
+process that only meant to read it — and the shape that triggers it is an
+ordinary bundled combinator library, not something built to attack. Every
+analyser that propagates a diagnostic list along a dataflow merge has the same
+exposure. Note also that the `lost trails` counts printed by earlier runs were
+counting copies: they are not counts of distinct lost trails.
+
+## The class is not more legible. That was the size cut reading itself.
+
+`analyzability --by-class` reported the quarantine class at **93.32%** byte
+coverage against **9.79%** for the watcher-threshold segment, and
+`child_process` reachable in **17.14%** of the class against **36.87%** outside
+it. Both numbers are real and neither is a fact about the class.
+
+**The class is defined as "under 100KB unpacked."** A native binary, a WASM
+module, a V8 bytecode cache and a webpack bundle do not fit in 100KB. The
+comparison segment is selected on a high score, which is enriched for exactly
+those. So the first table compares a cut that excludes opaque things against a
+cut that concentrates them, and the module table inverts for the same reason:
+bigger software reaches more modules.
+
+`analyzability --size-control --since=2026-08-15 --draw=200` asks the question
+the other one cannot. Every group is under 100KB, in the same window, matched to
+the class's own size distribution decile by decile, and differs from the class in
+**one conjunct of its definition**. Run 2026-08-17, v1.2.1:
+
+| group | n | fully legible | ships opaque | coverage by bytes |
+|---|---|---|---|---|
+| class, from disk (census) | 762 | 85.17% | 4.59% | 91.47% |
+| class, from the registry | 152 | 86.84% | 5.26% | 92.98% |
+| class **+repository** | 171 | 91.23% | 3.51% | 89.38% |
+| class **+age** | 169 | 79.29% | 9.47% | 91.29% |
+| **maintained** (genome, old, repo) | 183 | 85.25% | 7.65% | 93.26% |
+
+Ordinary maintained software under 100KB is **85.25%** fully legible. The class
+is **85.17%**. The difference is **-0.1pp (95% CI -5.2 to +6.2)**, inside the
+±10pp equivalence margin declared before the run.
+
+**Every legibility difference in the table includes zero** once the interval is
+widened for the ten endpoint comparisons the run prints (Bonferroni, z=2.81) —
+including the two that excluded it at a bare 95%. The finding is withdrawn.
+
+The gap between 93.32% and 9.79% was the 100KB cut. Below 100KB there is very
+little to be unable to read, whoever published it.
+
+**The module claim goes with it.** `child_process` differs by +6.9pp against
+maintained software (95% CI -6.8 to +15.9, widened for the 708 modules in that
+table) — it includes zero in every comparison the run makes. Two module rows do
+survive their own adjustment, and only against the far corner: the class reaches
+`fs` **+23.0pp** (+8.0 to +33.4) and `os` **+13.7pp** (+1.9 to +20.8) more often
+than maintained packages of the same size. Against the one-conjunct neighbours
+both include zero. Whatever that is, it is not the thing that was quoted.
+
+**Acquisition was measured rather than assumed.** The class was run through both
+paths — the captures taken at publication, and a fresh draw from
+`changes-log.ndjson` fetched from npm days later. They agree to **-1.7pp
+(-6.9 to +5.0)**, so the corpus is not distorting the class's legibility.
+
+### What did survive the control
+
+npm had already removed part of each group by the time the control ran, and the
+attrition is not spread evenly:
+
+| group | gone from npm 1-2 days after publication |
+|---|---|
+| class | **12 of 200 — 6.0% (3.5-10.2%)** |
+| class +repository | 2 of 200 — 1.0% (0.3-3.6%) |
+| class +age | 0 of 195 — 0.0% (0.0-1.9%) |
+| maintained | 0 of 195 — 0.0% (0.0-1.9%) |
+
+**+6.0pp against maintained (95% CI +2.8 to +10.2, excludes zero)**, at the same
+size, in the same window, one conjunct at a time. The class does separate from
+the ecosystem — on removals, which is what it was built to select for, and not
+on how readable its members are.
+
 ## Drift
 
 A detector degrades in one direction only: toward passing everything. Each

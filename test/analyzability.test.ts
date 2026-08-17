@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { rateWithCI } from '../src/stats.js'
 import { gzipSync } from 'node:zlib'
 
 import { readTar, gunzipIfNeeded, DEFAULT_TAR_LIMITS } from '../src/tarball.js'
@@ -32,7 +33,7 @@ import {
   type FileAnalysis,
   type LegibilityThreshold,
 } from '../src/analyzability.js'
-import { stratifiedSample, selfLabelledMinified, checkThreshold, analyzeCapture, type MetricRow } from '../src/analyzability-run.js'
+import { stratifiedSample, selfLabelledMinified, checkThreshold, analyzeCapture, canonicalModule, type MetricRow } from '../src/analyzability-run.js'
 import type { CorpusSample } from '../src/corpus.js'
 
 // ---------------------------------------------------------------------------
@@ -781,5 +782,37 @@ describe('what the first run found', () => {
     expect(result.error).toBeTruthy()
     expect(result.coverage).toBeNull()
     expect(result.executableBytes).toBe(0)
+  })
+})
+
+/**
+ * The corpus cut by class. The segmentation logic only — the run itself is a
+ * corpus pass, not a unit test.
+ */
+describe('cutting the corpus by class', () => {
+  it('node: and bare builtins are one module, and a subpath is its package', () => {
+    expect(canonicalModule('node:fs')).toBe('fs')
+    expect(canonicalModule('fs')).toBe('fs')
+    expect(canonicalModule('fs/promises')).toBe('fs')
+    expect(canonicalModule('node:child_process')).toBe('child_process')
+    expect(canonicalModule('lodash/get')).toBe('lodash')
+    // A scope is part of the name, so folding to the first segment would merge
+    // every package under an org into one.
+    expect(canonicalModule('@scope/pkg')).toBe('@scope/pkg')
+    expect(canonicalModule('@scope/pkg/sub')).toBe('@scope/pkg')
+  })
+
+  // The loss is not spread evenly: everything captured before 2026-08-15 is
+  // gone. A rate over a segment whose bytes are mostly gone is drawn from what
+  // survived, which is a date range rather than a sample of the segment — so the
+  // share has to be stated before the rate, not after it.
+  it('the share with bytes is a rate with its own interval, over the whole segment', () => {
+    const withBytes = rateWithCI(820, 2450)
+    expect(withBytes.rate).toBeCloseTo(0.3347, 3)
+    expect(withBytes.low).toBeLessThan(withBytes.rate!)
+    expect(withBytes.high).toBeGreaterThan(withBytes.rate!)
+    // n is the segment, not the survivors: quoting 820/820 would report the
+    // survivors as the segment.
+    expect(withBytes.n).toBe(2450)
   })
 })

@@ -357,6 +357,105 @@ async function main(): Promise<void> {
   // normal right now, and an attack is a change in what is normal, so a cut-off
   // recomputed from it rises exactly when it should not. This answers what a
   // budget costs in disk, and refuses the other question.
+  // Which modules a package can reach from its entry points, and by what route.
+  // It answers "can this reach X?" and refuses the other question: nothing here
+  // decides that reaching X is dangerous. That is A3, and A3 needs confirmed
+  // samples this corpus does not have — two with bytes, not eight.
+  if (command === 'reachability') {
+    const { analyzePackage } = await import('./reachability.js')
+    const { readTar } = await import('./tarball.js')
+    const { classifyFile } = await import('./file-kind.js')
+    const { loadCorpus } = await import('./corpus.js')
+    const { NgpackSource } = await import('./ngpack.js')
+
+    const target = args.find(a => a.startsWith('--capture='))?.split('=')[1]
+    if (!target) {
+      console.error('Usage: norte-guard reachability --capture=<package|path>')
+      console.error('One capture at a time. Running it over the corpus is a later phase.')
+      process.exit(1)
+    }
+
+    const corpus = loadCorpus()
+    const sample = corpus.samples.find(s => s.package === target || s.ngpackPath === target)
+    if (!sample) {
+      console.error(`No capture for ${target}`)
+      process.exit(1)
+    }
+    if (!sample.tarballPresent) {
+      console.error(`${sample.package}@${sample.version} has no tarball bytes on disk.`)
+      console.error('Two thirds of this corpus is in that state; see `norte-guard analyzability`.')
+      process.exit(1)
+    }
+
+    const source = new NgpackSource(sample.ngpackPath)
+    const tarball = source.tarballSync(sample.version) ?? source.tarballSync()
+    if (!tarball) {
+      console.error('the snapshot holds no tarball')
+      process.exit(1)
+    }
+
+    const archive = readTar(tarball)
+    const files = new Map<string, string>()
+    let packageJson: unknown = {}
+    let root = 'package'
+
+    for (const entry of archive.entries) {
+      const kind = classifyFile(entry.name, entry.data.subarray(0, 256)).kind
+      if (kind === 'javascript') files.set(entry.name, entry.data.toString('utf-8'))
+      if (/^[^/]+\/package\.json$/.test(entry.name)) {
+        root = entry.name.split('/')[0] ?? 'package'
+        try { packageJson = JSON.parse(entry.data.toString('utf-8')) } catch { /* leave it empty */ }
+      }
+    }
+
+    const result = analyzePackage({ files, packageJson, root })
+
+    console.log(`\nREACHABILITY  ${sample.package}@${sample.version}`)
+    console.log(`  ${sample.ngpackPath}`)
+    console.log(`\nENTRY POINTS`)
+    for (const e of result.entryPoints) console.log(`  ${e}`)
+    for (const e of result.missingEntryPoints) console.log(`  ${e}   [declared, not in the tarball]`)
+    if (result.entryPoints.length === 0) console.log('  (none resolved)')
+
+    console.log(`\nFILES REACHED FROM THEM  ${result.filesAnalysed.length} of ${files.size} parseable`)
+    for (const f of result.filesAnalysed) console.log(`  ${f}`)
+
+    console.log(`\nMODULES REACHABLE`)
+    if (result.reachable.length === 0) {
+      console.log('  (none)')
+    } else {
+      for (const r of result.reachable) {
+        console.log(
+          `  ${r.module.padEnd(28)} ${r.gates.join(',').padEnd(16)} via ${r.route.join(' > ')}`
+        )
+        for (const path of r.paths) console.log(`      .${path.join('.')}`)
+        for (const f of r.files) console.log(`      from ${f}`)
+      }
+    }
+
+    if (result.unresolvedLocal.length > 0) {
+      console.log(`\nRELATIVE SPECIFIERS THAT RESOLVE TO NO FILE IN THE PACKAGE`)
+      for (const u of result.unresolvedLocal) console.log(`  ${u}`)
+    }
+
+    console.log(`\nWHERE THE TRAIL WAS LOST  ${result.lost.length}`)
+    for (const l of result.lost) {
+      console.log(`  ${l.reason.padEnd(20)} ${(l.file ?? '?')}:${l.line ?? '?'}  ${l.detail}`)
+    }
+    if (result.lost.length === 0) console.log('  (nowhere)')
+
+    console.log(
+      `\nWHAT THIS CANNOT SAY\n` +
+      `  It answers "can this reach X", not "is this dangerous". Nothing here\n` +
+      `  classifies a module, and nothing scores.\n` +
+      `  A lost trail is not an absence. Every line above under "lost" is a place\n` +
+      `  something could be reached and this analysis stopped following.\n` +
+      `  Only files a JavaScript parser could read were followed; a native binary\n` +
+      `  or a WASM module reaches whatever it likes and appears nowhere here.\n`
+    )
+    return
+  }
+
   // What can be looked at at all, before anything looks. This detects nothing:
   // it measures the size of the blind spot every detector reports PASS into.
   if (command === 'analyzability') {
@@ -375,6 +474,286 @@ async function main(): Promise<void> {
     }
     const sample = num('sample', 0) || undefined
     const outDir = args.find(a => a.startsWith('--results-dir='))?.split('=')[1] ?? 'analyzability-results'
+
+    // The same cut, with size controlled. --by-class compares two filters
+    // against each other and one of them is defined as "under 100KB", so any
+    // legibility gap it reports is partly that definition reading itself back.
+    // This holds size fixed and varies the class definition one conjunct at a
+    // time.
+    if (args.includes('--size-control')) {
+      const { runSizeControl } = await import('./size-control.js')
+      const { formatDifference } = await import('./stats.js')
+
+      const since = args.find(a => a.startsWith('--since='))?.split('=')[1]
+      const until = args.find(a => a.startsWith('--until='))?.split('=')[1]
+      const output = args.find(a => a.startsWith('--output='))?.split('=')[1] ?? './norte-guard-captures'
+      const draw = num('draw', 0)
+
+      if (!since) {
+        console.error('Usage: norte-guard analyzability --size-control --since=<YYYY-MM-DD> [--draw=<n per cell>]')
+        console.error(
+          '\n--since is required and is not a preference. Two thirds of this corpus lost its\n' +
+          'tarballs to the object-store wipe, and what survived is everything captured after\n' +
+          '2026-08-15. A comparison without a window compares whichever weeks each group\n' +
+          'happened to survive in.'
+        )
+        process.exit(1)
+      }
+
+      const report = await runSizeControl({
+        outputDir: output,
+        threshold: MINIFIED_THRESHOLD,
+        engineVersion: engineVersion(),
+        since,
+        until,
+        drawPerCell: draw,
+        onProgress: (stage, d, t) => {
+          if (d === t || d % 50 === 0) process.stderr.write(`  ${stage}: ${d}/${t}\n`)
+        },
+      })
+
+      console.log(`\nANALYZABILITY, SIZE CONTROLLED  norte-guard v${report.engineVersion}`)
+      console.log(
+        `  every group is under ${report.maxBytes / 1000}KB unpacked and was seen on or after ` +
+        `${report.window.since}` + (report.window.until ? ` and before ${report.window.until}` : '')
+      )
+      console.log(
+        `\n  The by-class run cannot answer the question it looks like it answers. The\n` +
+        `  class is DEFINED as under 100KB, and a binary, a WASM module, a bytecode\n` +
+        `  cache and a webpack bundle do not fit in 100KB; the segment it was compared\n` +
+        `  against is selected on a high score, which is enriched for exactly those.\n` +
+        `  So here size is held fixed and the definition is varied one conjunct at a\n` +
+        `  time: +repository, +age, and the far corner where all three differ.`
+      )
+
+      console.log(`\nWHAT WAS ON DISK IN THE WINDOW`)
+      console.log(
+        `  ${report.corpus.inWindow} uncontaminated captures; ${report.corpus.overTheSizeBand} are over the size band ` +
+        `and out of this study, ${report.corpus.withBytes} are under it with bytes still on disk`
+      )
+      if (report.corpus.unclassifiable > 0) {
+        console.log(`  ${report.corpus.unclassifiable} could not be classified at all (no packument, a hash that does not match, or the captured version missing from it)`)
+      }
+      for (const c of report.corpus.byCell) {
+        console.log(`    ${c.cell.padEnd(12)} ${String(c.captures).padStart(6)} captures  ${String(c.packages).padStart(6)} packages`)
+      }
+
+      console.log(`\nWHAT THE PUBLISH STREAM HELD IN THE SAME WINDOW  (changes-log.ndjson)`)
+      console.log(`  ${report.pool.analysedInWindow} publications scored, ${report.pool.tinyInWindow} of them under 100KB`)
+      for (const c of report.pool.byCell) {
+        console.log(`    ${c.cell.padEnd(12)} ${String(c.packages).padStart(6)} packages`)
+      }
+      if (draw === 0) {
+        console.log(
+          `\n  NOTHING WAS DRAWN FROM IT. --draw=0 leaves the on-disk comparison as the only\n` +
+          `  one, and that one is NOT size-matched: it is captures the watcher kept for\n` +
+          `  scoring high. Re-run with --draw=<n> to draw each cell from the stream above\n` +
+          `  and fetch it from npm.`
+        )
+      }
+
+      console.log(`\nWHAT EACH GROUP IS`)
+      for (const g of report.groups) {
+        console.log(`  ${g.name}${g.sizeMatched ? '' : '   [NOT size-matched]'}`)
+        console.log(`    ${g.definition}`)
+        console.log(
+          `    ${g.members} packages, ${g.analysed} measured, ${g.scored} scored` +
+          (g.failures.length > 0 ? `; ${g.failures.length} could not be measured` : '') +
+          (g.unreadable > 0 ? `; ${g.unreadable} unreadable archives` : '') +
+          (g.nothingExecutable > 0 ? `; ${g.nothingExecutable} with nothing executable` : '')
+        )
+        console.log(
+          `    median ${g.medianUnpackedSize === null ? 'n/a' : `${(g.medianUnpackedSize / 1000).toFixed(1)}KB`}` +
+          `    by day: ` + (g.byDay.map(d => `${d.day.slice(5)}:${d.members}`).join('  ') || '(none)')
+        )
+        if (g.shortfall.length > 0) {
+          console.log(`    the pool could not fill: ` + g.shortfall.map(s => `${s.bucket} ${s.got}/${s.wanted}`).join('  '))
+        }
+      }
+
+      // The control, checkable. Every group is profiled in the CLASS's deciles,
+      // never in its own: a table where each column is cut at its own quantiles
+      // reads as a perfect match whatever the sizes are.
+      console.log(`\nDID THE MATCH WORK  (share of each group inside the class's own size deciles)`)
+      const cols = report.groups.map(g => g.name.split(',')[0]!.slice(0, 10).padStart(11)).join('')
+      console.log(`  ${'decile'.padEnd(16)}${cols}`)
+      for (let i = 0; i < report.buckets.length; i++) {
+        const cells = report.groups
+          .map(g => pct(g.sizeProfile[i]?.share ?? 0, 1).padStart(11))
+          .join('')
+        console.log(`  ${(report.buckets[i]?.label ?? '').padEnd(16)}${cells}`)
+      }
+
+      console.log(`\nLEGIBILITY`)
+      for (const g of report.groups) {
+        console.log(`\n  ${g.name}  (${g.scored} packages with something executable in them)`)
+        if (g.scored === 0) { console.log(`    nothing to measure`); continue }
+        console.log(`    fully legible           ${formatRateWithCI(g.fullyLegible.successes, g.fullyLegible.n)}`)
+        console.log(`    ships opaque executable ${formatRateWithCI(g.shipsOpaqueExecutable.successes, g.shipsOpaqueExecutable.n)}`)
+        console.log(`    coverage by bytes       ${g.byteCoverage === null ? 'n/a' : pct(g.byteCoverage)}`)
+        console.log(`    coverage, median pkg    ${g.medianCaptureCoverage === null ? 'n/a' : pct(g.medianCaptureCoverage)}`)
+        console.log(`    entry point followable  ${g.analysed > 0 ? pct(g.reachabilityAnalysed / g.analysed) : 'n/a'}`)
+        const reasons = g.reasons.filter(r => r.captures > 0)
+        if (reasons.length > 0) {
+          console.log(`    why not covered`)
+          for (const r of reasons) {
+            console.log(`      ${r.reason.padEnd(18)} ${formatRateWithCI(r.captureRate.successes, r.captureRate.n)}`)
+          }
+        }
+      }
+
+      for (const c of report.comparisons) {
+        console.log(`\n${'='.repeat(72)}`)
+        console.log(`${c.a}  vs  ${c.b}${c.sizeMatched ? '' : '   [NOT size-matched]'}`)
+        for (const e of c.endpoints) {
+          console.log(`\n  ${e.endpoint}`)
+          console.log(`    ${e.meaning}`)
+          console.log(`    ${formatDifference(e.difference)}`)
+          if (e.familyAdjusted) {
+            console.log(
+              `    widened for the ${c.endpointFamily} endpoint comparisons in this run ` +
+              `(z=${c.endpointZ?.toFixed(2)}): ${formatDifference(e.familyAdjusted)}`
+            )
+          }
+        }
+
+        const modules = c.modules.filter(m => Math.abs(m.difference.difference ?? 0) > 0).slice(0, 10)
+        if (modules.length > 0) {
+          console.log(
+            `\n  modules reachable, ${c.a} minus ${c.b}\n` +
+            `    intervals widened for the ${c.moduleComparisons} modules in this table ` +
+            `(Bonferroni, z=${c.moduleZ.toFixed(2)}): picking the largest row of a long\n` +
+            `    table and reading a 95% interval off it is how the last module finding was made.`
+          )
+          for (const m of modules) {
+            console.log(`    ${m.module.padEnd(24)} ${formatDifference(m.difference)}`)
+          }
+        }
+
+        console.log(`\n  ${c.verdict}`)
+        console.log(`  Caveat: ${c.caveat}.`)
+      }
+
+      console.log(`\nWHAT THIS STILL CANNOT SAY`)
+      for (const caveat of report.caveats) {
+        console.log(`  - ${caveat}`)
+      }
+
+      if (!args.includes('--no-save')) {
+        mkdirSync(outDir, { recursive: true })
+        const path = `${outDir}/size-control-${new Date().toISOString().slice(0, 10)}-v${report.engineVersion}.json`
+        write(path, JSON.stringify(report, null, 2))
+        console.log(`\nSaved to ${path}\n`)
+      }
+      return
+    }
+
+    // The corpus cut by class. Descriptive: it compares distributions and does
+    // not decide anything about any of them.
+    if (args.includes('--by-class')) {
+      const { runSegmentedAnalyzability } = await import('./analyzability-run.js')
+      const since = args.find(a => a.startsWith('--since='))?.split('=')[1]
+      const report = runSegmentedAnalyzability({
+        threshold: MINIFIED_THRESHOLD,
+        engineVersion: engineVersion(),
+        since,
+        sample,
+        onProgress: (d, t) => { if (d % 100 === 0) process.stderr.write(`  ${d}/${t}\n`) },
+      })
+
+      console.log(`\nANALYZABILITY BY CLASS  norte-guard v${report.engineVersion}`)
+      if (report.since) console.log(`  restricted to captures on or after ${report.since}`)
+
+      // Printed before any rate, for every segment, because the object store lost
+      // 3,169 of the 4,237 objects it ever held and the loss is not spread evenly
+      // across the classes. A rate over a segment whose bytes are mostly gone is
+      // drawn from whatever survived, and what survived is everything captured
+      // after 2026-08-15 — not a random sample of the segment.
+      console.log(`\nHOW MUCH OF EACH SEGMENT STILL HAS BYTES`)
+      console.log(`  ${'segment'.padEnd(24)} ${'captures'.padStart(9)} ${'with bytes'.padStart(11)}  share`)
+      for (const seg of report.segments) {
+        console.log(
+          `  ${seg.segment.padEnd(24)} ${String(seg.capturesTotal).padStart(9)} ` +
+          `${String(seg.capturesWithBytes).padStart(11)}  ` +
+          formatRateWithCI(seg.bytesShare.successes, seg.bytesShare.n)
+        )
+        console.log(
+          `    survivors by day: ` +
+          (seg.survivorsByDay.map(d => `${d.day.slice(5)}:${d.captures}`).join('  ') || '(none)')
+        )
+      }
+      console.log(
+        `  Every rate below this line is computed over the "with bytes" column and\n` +
+        `  over nothing else. The captures whose bytes are gone are not missing at\n` +
+        `  random: they are every capture taken before 2026-08-15.`
+      )
+
+      for (const seg of report.segments) {
+        console.log(`\n${'='.repeat(66)}`)
+        console.log(`${seg.segment}  n=${seg.analysed} analysed of ${seg.capturesTotal} in the corpus`)
+        if (seg.oldestCapturedAt) {
+          console.log(`  captured ${seg.oldestCapturedAt.slice(0, 10)} to ${(seg.newestCapturedAt ?? '').slice(0, 10)}`)
+        }
+        if (seg.analysed === 0) { console.log('  nothing to measure'); continue }
+
+        console.log(`  coverage by bytes             ${seg.byteCoverage === null ? 'n/a' : pct(seg.byteCoverage)}`)
+        console.log(`  coverage, median capture      ${seg.medianCaptureCoverage === null ? 'n/a' : pct(seg.medianCaptureCoverage)}`)
+        console.log(`  nothing executable            ${seg.nothingExecutable}`)
+        console.log(`  distribution  ` + seg.distribution.map(b => `${b.label}:${b.captures}`).join('  '))
+
+        console.log(`  why not covered`)
+        for (const r of seg.reasons) {
+          if (r.captures === 0) continue
+          console.log(
+            `    ${r.reason.padEnd(18)} ${formatRateWithCI(r.captureRate.successes, r.captureRate.n)}`
+          )
+        }
+
+        console.log(`  modules reachable  (over the ${seg.reachabilityAnalysed} captures with a readable entry point)`)
+        if (seg.reachabilityAnalysed === 0) {
+          console.log(`    none could be followed`)
+        } else {
+          for (const m of seg.modules.slice(0, 12)) {
+            console.log(`    ${m.module.padEnd(24)} ${formatRateWithCI(m.rate.successes, m.rate.n)}`)
+          }
+          console.log(`    ${seg.lostTrails} lost trails across the segment`)
+        }
+      }
+
+      console.log(
+        `\nWHAT THIS CANNOT SAY\n` +
+        `  Descriptive. A rate that separates two populations is a fact about the\n` +
+        `  populations, not a classifier: nothing here decides that a segment is\n` +
+        `  malicious and nothing scores.\n` +
+        `  The segments overlap on purpose — the confirmed captures are also\n` +
+        `  quarantine captures — so their columns are not a partition.\n` +
+        `  NEITHER SEGMENT IS THE BACKGROUND. quarantine-no-genome selects on "under\n` +
+        `  100KB", and small is most of what makes a package readable;\n` +
+        `  watcher-threshold selects on a high score, which is enriched for install\n` +
+        `  scripts and native addons by construction. So this compares two filters\n` +
+        `  against each other, not a class against the publish stream. Measuring\n` +
+        `  that needs an unselected sample, and the corpus holds none: everything\n` +
+        `  in it is here because a filter kept it.\n` +
+        `  Any legibility gap is therefore partly the two selections reading\n` +
+        `  themselves back, and how much cannot be established from this corpus.\n` +
+        `  THE BYTE LOSS IS NOT SYMMETRIC. Captures taken before the object store\n` +
+        `  existed kept their tarballs inline and survived the wipe, and they are\n` +
+        `  disproportionately watcher-threshold. Unrestricted, the survivors of the\n` +
+        `  two segments come from different weeks, so the comparison is partly a\n` +
+        `  comparison of the weeks. --since puts both on one window, and the\n` +
+        `  survivors-by-day line above is how to check that it worked.\n` +
+        `  Module rates count captures that reach a module at all, by any route.\n` +
+        `  A native binary reaches whatever it likes and appears in none of them.\n`
+      )
+
+      if (!args.includes('--no-save')) {
+        mkdirSync(outDir, { recursive: true })
+        const path = `${outDir}/by-class-${new Date().toISOString().slice(0, 10)}-v${report.engineVersion}.json`
+        write(path, JSON.stringify(report, null, 2))
+        console.log(`Saved to ${path}\n`)
+      }
+      return
+    }
 
     // The derivation mode. It writes the raw per-file metrics so the threshold
     // in analyzability.ts can be traced to a run instead of to a preference.
@@ -1070,6 +1449,7 @@ COMMANDS
   bench                     Run the public benchmark
   corpus                    List captures, labels and composition
   analyzability             How much of the corpus can be looked at at all
+  reachability              What one capture can reach, and by what route
   scores                    Score distribution of the publish stream
   track                     Follow watched packages until they resolve
   track --add=<pkg>         Register a prediction, dated, before it resolves
@@ -1095,6 +1475,27 @@ OPTIONS
 
       --sample=<n>         analyse n captures instead of all of them. The
                            confirmed_malicious ones are always included.
+      --by-class           cut the corpus by captureReason and compare the
+                           distributions, with reachable modules per segment.
+                           Descriptive: it classifies nothing — and it cannot
+                           answer whether the class is unusual, because the
+                           class is DEFINED as under 100KB and binaries, WASM
+                           and bundles do not fit in 100KB. Use --size-control
+                           for that.
+      --since=<YYYY-MM-DD> restrict every segment to one date window. The byte
+                           loss hit the segments unevenly, so an unrestricted
+                           comparison is partly a comparison of dates.
+      --size-control       the comparison --by-class cannot make: every group
+                           under 100KB, in one window, matched to the class's
+                           size distribution decile by decile, and differing
+                           from the class in ONE conjunct of its definition.
+                           Needs --since.
+      --draw=<n>           packages to draw per cell from changes-log.ndjson
+                           and fetch from npm (--size-control only). 0, the
+                           default, does no network and leaves only the on-disk
+                           comparison, which is not size-matched.
+      --until=<ISO>        the far end of the window, so a run can be repeated
+                           against the same members later
       --capture=<pkg>      one capture, with the per-file reasons
       --metrics            re-derive the minification threshold: writes every
                            per-file metric and checks the current cut against
