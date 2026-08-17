@@ -488,6 +488,11 @@ export interface RotationResult {
   // cap: what remains is confirmed evidence, which rotation will not touch. A
   // condition to act on, not one to keep deleting through.
   stillOverCap: boolean
+  // Why nothing was rotated, when the reason is the cap itself rather than the
+  // corpus being small enough. Same shape as objectSweepRefused above, for the
+  // same reason: a deleter that declines has to say so, because silence here
+  // reads as "there was nothing to delete".
+  refused?: string
 }
 
 // Deletes oldest first, and only captures still labelled 'unconfirmed'. Anything
@@ -512,6 +517,20 @@ export function rotateCaptures(
     objectsCollected: 0, objectBytesFreed: 0, stillOverCap: false,
   }
   if (!existsSync(capturesDir)) return empty
+
+  // A cap that is not a positive number is not a cap, and the loop below reads
+  // it as one that nothing can ever be under: `total <= NaN` is false forever,
+  // so every unconfirmed capture on the disk would be deleted. `--max-gb=oops`
+  // reaching this function is a typo; wiping the corpus is not a reasonable
+  // thing for a typo to do. The caller validates too — this is the floor.
+  if (!Number.isFinite(maxBytes) || maxBytes <= 0) {
+    return {
+      ...empty,
+      refused:
+        `the total cap is ${maxBytes}, which is not a size. Nothing was rotated: a cap ` +
+        `that cannot be compared against would delete every unconfirmed capture on the disk.`,
+    }
+  }
 
   const candidates: RotationCandidate[] = []
   // Every capture's objects, and how many captures reference each one. A tarball

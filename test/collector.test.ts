@@ -307,6 +307,36 @@ describe('rotateCaptures', () => {
     expect(existsSync(join(root, 'nueva'))).toBe(true)
   })
 
+  // `--max-gb=oops` reached this function as NaN. `total <= NaN` is false for
+  // every total, so the loop below never breaks and every unconfirmed capture
+  // goes. A typo must not be a way to wipe the corpus.
+  it('refuses a cap that is not a size, and deletes nothing', () => {
+    for (const cap of [NaN, 0, -1, Infinity]) {
+      const root = tempDir('ng-rot-nan-')
+      capture(root, 'una', { bytes: 4000, at: '2026-08-01T00:00:00Z' })
+      capture(root, 'otra', { bytes: 4000, at: '2026-08-05T00:00:00Z' })
+
+      const result = rotateCaptures(root, cap)
+
+      expect(result.deleted, `cap=${cap}`).toHaveLength(0)
+      expect(existsSync(join(root, 'una')), `cap=${cap}`).toBe(true)
+      expect(existsSync(join(root, 'otra')), `cap=${cap}`).toBe(true)
+      if (Number.isFinite(cap)) {
+        expect(result.refused, `cap=${cap}`).toBeTruthy()
+      }
+    }
+  })
+
+  it('rotates normally once the cap is a size again', () => {
+    const root = tempDir('ng-rot-ok-')
+    capture(root, 'vieja', { bytes: 4000, at: '2026-08-01T00:00:00Z' })
+    capture(root, 'nueva', { bytes: 4000, at: '2026-08-10T00:00:00Z' })
+
+    const result = rotateCaptures(root, 5000)
+    expect(result.refused).toBeUndefined()
+    expect(result.deleted).toHaveLength(1)
+  })
+
   it('NEVER deletes a labelled capture, however old', () => {
     const root = tempDir('ng-rot-label-')
     capture(root, 'confirmada', { bytes: 8000, at: '2020-01-01T00:00:00Z', label: 'confirmed_malicious' })

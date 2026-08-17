@@ -6,13 +6,17 @@ import { runBench } from './bench.js'
 import { DEFAULT_THRESHOLDS } from './types.js'
 import type { PackageSource } from './source.js'
 import type { WatchedPackage } from './watchlist.js'
+import { wantsHelp, helpTopic, parseGigabytes, flagValue, FlagError } from './args.js'
 
 const args = process.argv.slice(2)
 const command = args[0]
 
 async function main(): Promise<void> {
-  if (!command || command === '--help' || command === '-h') {
-    printHelp()
+  // Before anything reads a command, because a help flag must have no effects.
+  // `watch --help` used to fall through to the watch branch and start a second
+  // collector writing into ./captures — from a line that asked for a help page.
+  if (wantsHelp(args)) {
+    printHelp(helpTopic(args))
     return
   }
 
@@ -1135,7 +1139,52 @@ async function main(): Promise<void> {
 
     console.log(`\nDaily budget: ${formatBytes(budget.spent)} of ${formatBytes(budget.dailyBytes)}`)
     console.log(`Captures today: ${budget.captures} - skipped over cap: ${budget.skipped}`)
-    console.log(`Remaining: ${formatBytes(budget.remaining)}\n`)
+    console.log(`Remaining: ${formatBytes(budget.remaining)}`)
+
+    // The other budget, which had no way to be read at all. It is the one that
+    // deletes things, and the number it compares against is not the one the
+    // object-store ledger prints: the ledger records every object ever written,
+    // including the 3,169 that a wipe already took, so it reads GB above what
+    // is on the disk. This is the disk.
+    const { rotateCaptures, DEFAULT_TOTAL_BYTES } = await import('./capture-budget.js')
+    let cap: number
+    try {
+      cap = parseGigabytes(flagValue(args, 'total-cap') ?? flagValue(args, 'max-gb'), 'total-cap')
+        ?? DEFAULT_TOTAL_BYTES
+    } catch (e) {
+      if (!(e instanceof FlagError)) throw e
+      console.error(e.message)
+      process.exit(1)
+    }
+
+    const rotation = rotateCaptures(join(dir, 'captures'), cap, true)
+    const headroom = cap - rotation.before
+    console.log(
+      `\nOn disk: ${formatBytes(rotation.before)} of a ${formatBytes(cap)} total cap ` +
+      `(${rotation.protectedCount} labelled captures, never rotated)`
+    )
+
+    // Rotation runs at startup and nowhere else, so this is a statement about
+    // the next restart rather than about the next minute. Saying "over the cap"
+    // without saying when would read as a deletion in progress.
+    if (rotation.deleted.length > 0) {
+      console.log(
+        `\nTHE NEXT WATCHER RESTART WOULD DELETE ${rotation.deleted.length} CAPTURES ` +
+        `(${formatBytes(rotation.deleted.reduce((a, d) => a + d.bytes, 0) + rotation.objectBytesFreed)}), ` +
+        `oldest first, to get under the cap.`
+      )
+      for (const d of rotation.deleted.slice(0, 5)) {
+        console.log(`   - ${d.path} (${formatBytes(d.bytes)}, captured ${d.capturedAt.slice(0, 10)})`)
+      }
+      if (rotation.deleted.length > 5) console.log(`   - and ${rotation.deleted.length - 5} more`)
+      console.log(
+        `\nRestart it with --total-cap=<GB> to keep them. Rotation happens at startup, ` +
+        `so nothing is deleted while the current process keeps running.`
+      )
+    } else {
+      console.log(`Headroom: ${formatBytes(headroom)} before the next restart starts rotating.`)
+    }
+    console.log()
     return
   }
 
@@ -1397,10 +1446,26 @@ async function main(): Promise<void> {
       ? { genome: parseInt(budgetArg), noGenome: parseInt(noGenomeArg ?? budgetArg) }
       : { ...DEFAULT_CAPTURE_BUDGET, ...(noGenomeArg ? { noGenome: parseInt(noGenomeArg) } : {}) }
 
-    const gb = (flag: string) => {
-      const raw = args.find(a => a.startsWith(`--${flag}=`))?.split('=')[1]
-      return raw === undefined ? undefined : Math.round(parseFloat(raw) * 1024 ** 3)
+    // --total-cap is the name the watcher already prints ("total cap: 10.00GB")
+    // and the one the rotation is about. --max-gb stays accepted so existing
+    // invocations keep working, the same way --threshold did when it became
+    // --capture-budget.
+    //
+    // Sizes are parsed here so a typo fails on the command line rather than
+    // three functions deeper: --total-cap=oops used to reach rotateCaptures as
+    // NaN, and nothing is ever under a NaN cap.
+    let dailyByteBudget: number | undefined
+    let maxCaptureBytes: number | undefined
+    try {
+      dailyByteBudget = parseGigabytes(flagValue(args, 'daily-gb'), 'daily-gb')
+      maxCaptureBytes = parseGigabytes(flagValue(args, 'total-cap'), 'total-cap')
+        ?? parseGigabytes(flagValue(args, 'max-gb'), 'max-gb')
+    } catch (e) {
+      if (!(e instanceof FlagError)) throw e
+      console.error(e.message)
+      process.exit(1)
     }
+
     const lagRaw = args.find(a => a.startsWith('--lag-alert='))?.split('=')[1]
     const feed = args.find(a => a.startsWith('--feed='))?.split('=')[1] === 'rss' ? 'rss' as const : 'changes' as const
     const agreed = args.includes('--i-understand-the-risks')
@@ -1417,8 +1482,8 @@ async function main(): Promise<void> {
       captureBudgetThreshold: captureBudget,
       verbose: false,
       feed,
-      dailyByteBudget: gb('daily-gb'),
-      maxCaptureBytes: gb('max-gb'),
+      dailyByteBudget,
+      maxCaptureBytes,
       lagAlertThreshold: lagRaw !== undefined ? parseInt(lagRaw) : undefined,
       quarantine: {
         enabled: !args.includes('--no-quarantine'),
@@ -1435,7 +1500,78 @@ async function main(): Promise<void> {
   process.exit(1)
 }
 
-function printHelp(): void {
+// Per-command help for the commands that have a flag surface of their own AND
+// do something when they run. Today that is `watch`, which is why the bug that
+// prompted this mattered: the page nobody could reach is the page describing
+// the flags that bound what the process writes to the disk. Everything else
+// falls through to the full help.
+const COMMAND_HELP: Record<string, string> = {
+  watch: `
+norte-guard watch - monitor the registry and capture suspicious packages
+
+  norte-guard watch --i-understand-the-risks [options]
+
+Downloads packages from npm to your disk, some of which are malware. It never
+extracts or executes them. --i-understand-the-risks is required and there is no
+way to configure it away.
+
+WHAT IT COSTS, AND HOW TO BOUND IT
+  --daily-gb=<n>     Hard stop on downloads per UTC day (default: 2). Reached,
+                     the feed is still enumerated and scored; only tarball
+                     downloads stop.
+  --total-cap=<n>    GB of captures/ — the capture directories AND the shared
+                     object store under them — before the oldest captures
+                     rotate out (default: 10). Rotation runs at startup, before
+                     the first capture, so a run that begins over the cap frees
+                     space instead of adding to it. It NEVER deletes a labelled
+                     capture: what remains over the cap is confirmed evidence.
+                     --max-gb=<n> is still accepted as the old name.
+  --capture-budget=<n>
+                     How much disk the collector spends, not what it detects
+                     (default: genome 50, no-genome 20). NEVER derived from the
+                     stream: a campaign in progress would raise the percentiles
+                     and relax the collector on the day it matters most.
+  --capture-budget-no-genome=<n>
+                     The same budget for packages with no history to score
+                     against, when it should differ from the genome one.
+  --threshold=<n>    The old name for --capture-budget. Accepted, and wrong:
+                     reading a capture budget as a detection threshold is what
+                     made deriving it from the stream look reasonable.
+
+WHAT IT KEEPS
+  --output=<dir>     Where captures, logs and the object store go
+                     (default: ./captures)
+  --no-quarantine    Do not capture the observed class at all
+  --quarantine-days=<n>
+                     Days a quarantine capture is kept before it deletes itself
+                     unless something confirms it first (default: 7)
+
+HOW IT READS THE REGISTRY
+  --feed=changes     The _changes feed with a persisted cursor (default). A gap
+                     is detectable and recoverable.
+  --feed=rss         The RSS window. Fixed size, no cursor: what does not fit
+                     between two polls was never seen and leaves no trace.
+  --lag-alert=<n>    Cursor lag in seq that raises an alert (default: 150)
+
+EXAMPLES
+  norte-guard watch --i-understand-the-risks
+  norte-guard watch --i-understand-the-risks --total-cap=40 --daily-gb=4 \\
+    --output=./norte-guard-captures
+
+The cap counts what is on disk under captures/, which includes the object
+store. \`norte-guard budget\` prints what that total is now without starting
+anything.
+`,
+}
+
+function printHelp(topic?: string): void {
+  const page = topic === undefined ? undefined : COMMAND_HELP[topic]
+  if (page) {
+    console.log(page)
+    console.log(`  norte-guard --help for every other command.\n`)
+    return
+  }
+
   console.log(`
 norte-guard - the npm quarantine copilot
 
@@ -1542,9 +1678,13 @@ OPTIONS
       most. --threshold=<n> is still accepted as the old name.
 
   --daily-gb=<n>    Hard download cap per UTC day (default: 2)
-  --max-gb=<n>      Size of captures/ before the oldest rotate out (default: 10)
+  --total-cap=<n>   GB of captures/ — directories and the object store under
+                    them — before the oldest rotate out (default: 10).
                     Rotation never deletes a labelled capture.
+                    --max-gb=<n> is still accepted as the old name.
   --lag-alert=<n>   Cursor lag in seq that raises an alert (default: 150)
+
+  norte-guard watch --help for the rest of the collector's flags.
 
 EXAMPLES
   norte-guard inspect keyv@6.0.0

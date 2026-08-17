@@ -120,6 +120,33 @@ A hard daily download budget (2 GB) stops the collector fetching tarballs when
 spent — it keeps enumerating and scoring — and captures rotate out oldest-first
 past a total cap. Neither ever deletes a capture someone has labelled.
 
+```bash
+norte-guard watch --i-understand-the-risks --total-cap=40 --daily-gb=4
+norte-guard budget          # what is on disk, against the cap, without starting anything
+norte-guard watch --help    # the collector's flags, and nothing else
+```
+
+**The total cap defaults to 10 GB and rotation runs at startup only.** A running
+collector never deletes, however far past the cap it goes; the deletion happens
+the next time it starts, before the first capture, so a run that begins over the
+cap frees space instead of adding to it. That means the moment to think about the
+cap is the restart, and `norte-guard budget` prints what that restart would
+delete, by name, before it happens.
+
+`--total-cap=<GB>` sets it. `--max-gb=<GB>` is the old name and still works.
+
+The number the cap compares against is **the bytes under `captures/`** — the
+capture directories and the shared object store beneath them. It is not the
+total in the object store's index: `index.ndjson` is append-only and records
+every object ever written, including the ones a wipe has already taken, so it
+reads gigabytes above what is on the disk. On this corpus the two are 12.24 GB
+(ledger) against 9.76 GB (disk).
+
+A cap that is not a positive number is refused by both the flag parser and the
+rotation itself. `--total-cap=oops` used to parse to `NaN`, and nothing is ever
+under a `NaN` cap: the rotation loop would have deleted every unconfirmed
+capture on the disk.
+
 Tarballs live in a content-addressed store, `captures/objects/<sha256>`, so the
 same bytes captured twice cost nothing the second time and the file name is its
 own integrity check. They are stored exactly as the registry served them:

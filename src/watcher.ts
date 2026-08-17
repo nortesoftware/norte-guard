@@ -789,6 +789,9 @@ export async function startWatcher(config: WatcherConfig): Promise<void> {
   // Before the first capture, so a run that starts over the cap frees space
   // instead of adding to it.
   const rotation = rotateCaptures(join(config.outputDir, 'captures'), maxBytes)
+  if (rotation.refused) {
+    console.error(`ROTATION REFUSED: ${rotation.refused}`)
+  }
   if (rotation.deleted.length > 0) {
     console.log(
       `Rotation: ${rotation.deleted.length} old captures deleted ` +
