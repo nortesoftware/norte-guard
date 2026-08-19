@@ -182,6 +182,20 @@ export interface CorpusAnalyzability {
   // The two questions this run exists to answer, computed rather than left to
   // the reader.
   shipsOpaqueExecutable: RateWithCI
+  // Captures whose tarball the collector refused for size, packument kept. They
+  // are NOT in the rate above and cannot be: nobody looked at them. They are
+  // here because a prevalence whose denominator quietly dropped the largest
+  // members of the population is not defensible, and this is what makes it
+  // possible to state the same rate over the complete set.
+  refusedForSize: number
+  // The headline rate over `readable + refusedForSize`, bounding the refused
+  // captures both ways: none of them ships an opaque executable, then all of
+  // them do. The truth is inside, and the width is the price of the cap.
+  shipsOpaqueExecutableComplete: {
+    denominator: number
+    low: number | null
+    high: number | null
+  }
   confirmedMalicious: CaptureAnalyzability[]
 }
 
@@ -237,6 +251,10 @@ export function runCorpusAnalyzability(options: RunOptions): CorpusAnalyzability
     corpusTotal: uncontaminated.length,
     confirmedWithoutBytes: allConfirmed.length - confirmed.length,
     confirmedTotal: allConfirmed.length,
+    // Counted over the same population the rates are computed on. A capture
+    // whose tarball was refused is a package this pass knows the size of and
+    // nothing else, which is exactly what the bound above is for.
+    refusedForSize: uncontaminated.filter(s => s.tarballRefused).length,
   })
 }
 
@@ -272,6 +290,7 @@ export function summariseCorpus(
     corpusTotal?: number
     confirmedWithoutBytes?: number
     confirmedTotal?: number
+    refusedForSize?: number
   }
 ): CorpusAnalyzability {
   const unreadable = results.filter(r => r.error && r.executableFiles === 0).length
@@ -319,6 +338,9 @@ export function summariseCorpus(
   const opaqueKinds: NonCoverageReason[] = ['native-binary', 'wasm', 'bytecode', 'minified']
   const withOpaque = readable.filter(r => opaqueKinds.some(k => r.byReason[k])).length
 
+  const refusedForSize = meta.refusedForSize ?? 0
+  const complete = readable.length + refusedForSize
+
   return {
     ranAt: meta.ranAt,
     engineVersion: meta.engineVersion,
@@ -342,6 +364,12 @@ export function summariseCorpus(
     reasons,
     heldOut,
     shipsOpaqueExecutable: rateWithCI(withOpaque, readable.length),
+    refusedForSize,
+    shipsOpaqueExecutableComplete: {
+      denominator: complete,
+      low: complete > 0 ? withOpaque / complete : null,
+      high: complete > 0 ? (withOpaque + refusedForSize) / complete : null,
+    },
     confirmedMalicious: results.filter(r =>
       meta.confirmedPackages.has(`${r.package}@${r.version}`)
     ),

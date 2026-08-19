@@ -1,0 +1,288 @@
+
+CAPABILITIES, CONTROLLED  norte-guard v1.4.0
+  window 2026-08-15T01:25 to 2026-08-17T13:45
+
+WHAT THIS RUN FOUND
+  NOTHING IS ESTABLISHED. At the publisher unit — 3 cases against 49
+  controls, the unit declared before the run because it is the one whose
+  members are independent events — not one of the four capabilities
+  separates the confirmed removals from size-matched packages npm did not
+  remove. credential_read and network_egress are not calculable at all:
+  every case is indeterminate, and a rate over an empty denominator is not a
+  rate. external_exec and dynamic_code are inconclusive — the interval
+  includes zero. dynamic_code DOES separate at the capture unit, and that is
+  not a second measurement of the same thing: 36 of 42 case captures are
+  @siwatfa/yorn, so a rate there is a rate of republishing. Read it as a
+  fact about one operator's release count, not about malicious packages.
+
+  at the publisher unit, 3 cases vs 49 controls:
+    credential_read   not calculable — every case indeterminate
+    network_egress    not calculable — every case indeterminate
+    external_exec     inconclusive — the interval includes zero
+    dynamic_code      inconclusive — the interval includes zero
+
+THE FOUR, AS DEFINED BEFORE THE RUN
+  credential_read   fs reached AND a string naming a secret reached a filesystem or path call (16 paths, plus .env files), OR process.env read of a token-shaped variable (11 words, 7 named)
+  network_egress    reaches net, http, https, dgram, or calls the global fetch
+  external_exec     reaches child_process
+  dynamic_code      reaches vm, or calls eval/Function, or a require/import specifier decided at runtime
+
+WHAT THE CASES ACTUALLY ARE
+  68 confirmed_malicious captures, 42 of them with bytes
+  42 captures  ->  6 packages  ->  3 npm accounts
+    siwatfa         36 captures   @siwatfa/yorn
+    ferrousdev       4 captures   bcs-core, leb128x, sui-gql-core
+    a_soclav         2 captures   kit-hydration-vim, svelte-goal-vim
+
+THE POOL THE CONTROL WAS DRAWN FROM
+  7611 uncontaminated captures in the window, 7170 with bytes
+  6983 left after removing every package known to have been withdrawn (614 names known)
+    takedown-log (npm published 0.0.1-security)       233 names, 233 new here
+    takedowns.json (the sweep)                         73 names, 72 new here
+    deletions.ndjson (gone from the registry)         169 names, 168 new here
+    ttr-log.ndjson (a version was unpublished)        161 names, 129 new here
+    this corpus (labelled or holding the placeholder)   71 names, 12 new here
+  4619 distinct packages, one capture each
+    watcher-threshold        3346
+    quarantine-no-genome     1273
+
+THE MATCH  10 controls per case, within a factor of 2.0 on unpacked size
+  This table is where the size control is checked, and the only place it can be:
+  the pooled medians below cannot check it, because the cases are 36 captures of one
+  26MB package beside six of five tiny ones.
+  @siwatfa/yorn@1.0.41            26074395 B  ->  10 packages (11 captures)  25608144-26605866 B  worst ratio 1.02x
+  kit-hydration-vim@1.0.0            72387 B  ->  10 packages (29 captures)  71958-93671 B  worst ratio 1.29x
+  svelte-goal-vim@1.0.0               8124 B  ->  10 packages (11 captures)  8049-8188 B  worst ratio 1.01x
+  bcs-core@1.0.0                      2302 B  ->  10 packages (12 captures)  2210-2308 B  worst ratio 1.04x
+  sui-gql-core@0.2.0                  4118 B  ->  10 packages (11 captures)  3987-4233 B  worst ratio 1.03x
+  leb128x@1.0.0                       2404 B  ->  10 packages (13 captures)  2339-3857 B  worst ratio 1.60x
+  dropped on expansion, outside the band: 12 captures of 3 matched control packages
+    eslint-plugin-tailwind-suggestions@1.0.5            9109 B  3.79x
+    eslint-plugin-tailwind-suggestions@1.0.6            9109 B  3.79x
+    eslint-plugin-tailwind-suggestions@1.0.7            9109 B  3.79x
+    eslint-plugin-tailwind-suggestions@1.0.7            9109 B  3.79x
+    eslint-plugin-tailwind-suggestions@1.0.9            9109 B  3.79x
+    eslint-plugin-tailwind-suggestions@1.0.10           9111 B  3.79x
+    eslint-plugin-tailwind-suggestions@1.0.11           9111 B  3.79x
+    eslint-plugin-tailwind-suggestions@1.0.12           9111 B  3.79x
+    ... and 4 more
+
+WHAT THIS RUN COULD HAVE FOUND, BEFORE READING WHAT IT DID
+  With 3 cases and 49 controls, the most this run can find is: every case reaches a capability and at most 10 of 49 controls (20.4%) do. Anything commoner than that in the controls cannot be separated from it at this n, whatever the cases do.
+
+THE SIX, ONE BY ONE   (every capture of each folded together)
+  package              acct        caps     bytes  cred net exec dyn
+  @siwatfa/yorn        siwatfa       36  26074395   ?   ?   ?    Y    [bytecode,minified]
+      + dynamic_code: calls Function at package/dist/load.cjs:2
+      + dynamic_code: Function() over a body built at runtime at package/dist/load.cjs:1
+  leb128x              ferrousdev     2      2404   ?   Y   ?    ? 
+      + network_egress: calls the global fetch at package/_perf.js:8
+  kit-hydration-vim    a_soclav       1     72387   ?   ?   Y    ?    [native-binary]
+      + external_exec: reaches node:child_process via gate > binding from package/dist/index.mjs
+  svelte-goal-vim      a_soclav       1      8124   ?   .   .    . 
+  bcs-core             ferrousdev     1      2302   ?   ?   ?    ? 
+  sui-gql-core         ferrousdev     1      4118   .   Y   .    . 
+      + network_egress: calls the global fetch at package/index.js:39
+  Y reached   . not reached   ? nobody could establish either
+
+WHERE THE CASES ALREADY TOUCHED THIS CODEBASE
+  @siwatfa/yorn        src/reachability.ts, the comment above MAX_BODY_WALKS
+                       it is the named reason the function-body walk is bounded at 300, and that bound raises depth-limit, which blinds all four capabilities
+  kit-hydration-vim    test/analyzability.test.ts and docs/benchmark.md
+                       its calc.dat is the worked example for classifying a file by magic bytes rather than extension, and that classifier is what sets opaqueExecutable, which blinds all four capabilities
+  svelte-goal-vim      docs/benchmark.md
+                       reported there as a coverage result. It is a number that was printed about it, not a rule that was drawn from it
+  answers resting on the contaminated walk bound alone: 0; on the contaminated file classifier alone: 0
+  No capability answer in the case cohort rests on either contaminated bound alone: every indeterminate is indeterminate for at least one other reason as well. The contamination is in the provenance and is declared; it is not in these numbers.
+
+==========================================================================
+AT THE PUBLISHER LEVEL   <- primary: independent events   cases n=3, controls n=49
+  pooled median unpacked size (NOT the match, which is per case above): cases 72387 B, controls 8123 B
+  what this unit could find: With 3 cases and 49 controls, the most this run can find is: every case reaches a capability and at most 10 of 49 controls (20.4%) do. Anything commoner than that in the controls cannot be separated from it at this n, whatever the cases do.
+  ships something no parser reads: cases 2/3, controls 12/49
+  never opened at all (no JavaScript, or past the size bound): cases 0/3, controls 15/49
+  blinded at entry, either way: cases 2/3, controls 22/49
+  reaches a dependency not in the tarball: cases 0/3, controls 21/49
+  credential_read by half — a secret path that reached a call: cases 0, controls 1;  a token-shaped env var: cases 0, controls 2
+
+  capability        cases                        controls                    
+  credential_read   0r 0n 3?  n/a                3r 10n 36?  23%             
+    bounded: cases 0%-100%, controls 6%-80%
+    not calculable, one side is empty
+    widened for the 20 interval comparisons this run printed (z=3.02): not calculable, one side is empty
+    Not calculable. 0 of the cases and 13 of the controls got a yes-or-no answer for credential_read; the rest were indeterminate, and a rate over an empty denominator is not a rate.
+  network_egress    0r 0n 3?  n/a                10r 11n 28?  48%            
+    bounded: cases 0%-100%, controls 20%-78%
+    not calculable, one side is empty
+    widened for the 20 interval comparisons this run printed (z=3.02): not calculable, one side is empty
+    Not calculable. 0 of the cases and 21 of the controls got a yes-or-no answer for network_egress; the rest were indeterminate, and a rate over an empty denominator is not a rate.
+  external_exec     1r 0n 2?  100%               12r 13n 24?  48%            
+    bounded: cases 33%-100%, controls 24%-73%
+    +52.0pp (95% CI -29.5pp to +70.0pp, includes zero)
+    widened for the 20 interval comparisons this run printed (z=3.02): +52.0pp (95% CI -41.9pp to +77.3pp, includes zero)
+    INCONCLUSIVE at this n. +52.0pp, interval -41.9pp to +77.3pp, over 1 cases and 25 controls. Neither a difference nor the absence of one. The case side has 2 indeterminate, so the group is between 33.3% and 100.0% whatever this interval says.
+  dynamic_code      1r 0n 2?  100%               5r 13n 31?  28%             
+    bounded: cases 33%-100%, controls 10%-73%
+    +72.2pp (95% CI -10.4pp to +87.5pp, includes zero)
+    widened for the 20 interval comparisons this run printed (z=3.02): +72.2pp (95% CI -24.3pp to +91.8pp, includes zero)
+    INCONCLUSIVE at this n. +72.2pp, interval -24.3pp to +91.8pp, over 1 cases and 18 controls. Neither a difference nor the absence of one. The case side has 2 indeterminate, so the group is between 33.3% and 100.0% whatever this interval says.
+
+==========================================================================
+AT THE PUBLISHER-ANY LEVEL   <- what an operator ever demonstrated   cases n=3, controls n=49
+  pooled median unpacked size (NOT the match, which is per case above): cases 72387 B, controls 8123 B
+  what this unit could find: With 3 cases and 49 controls, the most this run can find is: every case reaches a capability and at most 10 of 49 controls (20.4%) do. Anything commoner than that in the controls cannot be separated from it at this n, whatever the cases do.
+  ships something no parser reads: cases 2/3, controls 12/49
+  never opened at all (no JavaScript, or past the size bound): cases 0/3, controls 15/49
+  blinded at entry, either way: cases 2/3, controls 22/49
+  reaches a dependency not in the tarball: cases 0/3, controls 21/49
+  credential_read by half — a secret path that reached a call: cases 0, controls 1;  a token-shaped env var: cases 0, controls 2
+
+  capability        cases                        controls                    
+  credential_read   0r 0n 3?  n/a                3r 10n 36?  23%             
+    bounded: cases 0%-100%, controls 6%-80%
+    not calculable, one side is empty
+    widened for the 20 interval comparisons this run printed (z=3.02): not calculable, one side is empty
+    Not calculable. 0 of the cases and 13 of the controls got a yes-or-no answer for credential_read; the rest were indeterminate, and a rate over an empty denominator is not a rate.
+  network_egress    1r 0n 2?  100%               10r 11n 28?  48%            
+    bounded: cases 33%-100%, controls 20%-78%
+    +52.4pp (95% CI -29.4pp to +71.7pp, includes zero)
+    widened for the 20 interval comparisons this run printed (z=3.02): +52.4pp (95% CI -42.1pp to +79.2pp, includes zero)
+    INCONCLUSIVE at this n. +52.4pp, interval -42.1pp to +79.2pp, over 1 cases and 21 controls. Neither a difference nor the absence of one. The case side has 2 indeterminate, so the group is between 33.3% and 100.0% whatever this interval says.
+  external_exec     1r 0n 2?  100%               13r 12n 24?  52%            
+    bounded: cases 33%-100%, controls 27%-76%
+    +48.0pp (95% CI -33.4pp to +66.5pp, includes zero)
+    widened for the 20 interval comparisons this run printed (z=3.02): +48.0pp (95% CI -45.6pp to +74.4pp, includes zero)
+    INCONCLUSIVE at this n. +48.0pp, interval -45.6pp to +74.4pp, over 1 cases and 25 controls. Neither a difference nor the absence of one. The case side has 2 indeterminate, so the group is between 33.3% and 100.0% whatever this interval says.
+  dynamic_code      1r 0n 2?  100%               5r 12n 32?  29%             
+    bounded: cases 33%-100%, controls 10%-76%
+    +70.6pp (95% CI -12.2pp to +86.7pp, includes zero)
+    widened for the 20 interval comparisons this run printed (z=3.02): +70.6pp (95% CI -26.1pp to +91.3pp, includes zero)
+    INCONCLUSIVE at this n. +70.6pp, interval -26.1pp to +91.3pp, over 1 cases and 17 controls. Neither a difference nor the absence of one. The case side has 2 indeterminate, so the group is between 33.3% and 100.0% whatever this interval says.
+
+==========================================================================
+AT THE PACKAGE LEVEL   cases n=6, controls n=60
+  pooled median unpacked size (NOT the match, which is per case above): cases 8124 B, controls 8049 B
+  what this unit could find: With 6 cases and 60 controls, the most this run can find is: every case reaches a capability and at most 21 of 60 controls (35.0%) do. Anything commoner than that in the controls cannot be separated from it at this n, whatever the cases do.
+  ships something no parser reads: cases 2/6, controls 12/60
+  never opened at all (no JavaScript, or past the size bound): cases 0/6, controls 17/60
+  blinded at entry, either way: cases 2/6, controls 24/60
+  reaches a dependency not in the tarball: cases 2/6, controls 30/60
+  credential_read by half — a secret path that reached a call: cases 0, controls 1;  a token-shaped env var: cases 0, controls 2
+
+  capability        cases                        controls                    
+  credential_read   0r 1n 5?  0%                 3r 18n 39?  14%             
+    bounded: cases 0%-83%, controls 5%-70%
+    -14.3pp (95% CI -34.6pp to +65.6pp, includes zero)
+    widened for the 20 interval comparisons this run printed (z=3.02): -14.3pp (95% CI -47.2pp to +76.6pp, includes zero)
+    INCONCLUSIVE at this n. -14.3pp, interval -47.2pp to +76.6pp, over 1 cases and 21 controls. Neither a difference nor the absence of one. The case side has 5 indeterminate, so the group is between 0.0% and 83.3% whatever this interval says.
+  network_egress    1r 1n 4?  50%                10r 19n 31?  34%            
+    bounded: cases 17%-83%, controls 17%-68%
+    +15.5pp (95% CI -28.9pp to +58.6pp, includes zero)
+    widened for the 20 interval comparisons this run printed (z=3.02): +15.5pp (95% CI -37.4pp to +65.0pp, includes zero)
+    INCONCLUSIVE at this n. +15.5pp, interval -37.4pp to +65.0pp, over 2 cases and 29 controls. Neither a difference nor the absence of one. The case side has 4 indeterminate, so the group is between 16.7% and 83.3% whatever this interval says.
+  external_exec     1r 2n 3?  33%                12r 21n 27?  36%            
+    bounded: cases 17%-67%, controls 20%-65%
+    -3.0pp (95% CI -35.1pp to +45.0pp, includes zero)
+    widened for the 20 interval comparisons this run printed (z=3.02): -3.0pp (95% CI -42.6pp to +55.7pp, includes zero)
+    INCONCLUSIVE at this n. -3.0pp, interval -42.6pp to +55.7pp, over 3 cases and 33 controls. Neither a difference nor the absence of one. The case side has 3 indeterminate, so the group is between 16.7% and 66.7% whatever this interval says.
+  dynamic_code      1r 2n 3?  33%                5r 21n 34?  19%             
+    bounded: cases 17%-67%, controls 8%-65%
+    +14.1pp (95% CI -18.9pp to +61.2pp, includes zero)
+    widened for the 20 interval comparisons this run printed (z=3.02): +14.1pp (95% CI -28.2pp to +71.1pp, includes zero)
+    INCONCLUSIVE at this n. +14.1pp, interval -28.2pp to +71.1pp, over 3 cases and 26 controls. Neither a difference nor the absence of one. The case side has 3 indeterminate, so the group is between 16.7% and 66.7% whatever this interval says.
+
+==========================================================================
+AT THE PACKAGE-ANY LEVEL   cases n=6, controls n=60
+  pooled median unpacked size (NOT the match, which is per case above): cases 8124 B, controls 8049 B
+  what this unit could find: With 6 cases and 60 controls, the most this run can find is: every case reaches a capability and at most 21 of 60 controls (35.0%) do. Anything commoner than that in the controls cannot be separated from it at this n, whatever the cases do.
+  ships something no parser reads: cases 2/6, controls 12/60
+  never opened at all (no JavaScript, or past the size bound): cases 0/6, controls 17/60
+  blinded at entry, either way: cases 2/6, controls 24/60
+  reaches a dependency not in the tarball: cases 2/6, controls 30/60
+  credential_read by half — a secret path that reached a call: cases 0, controls 1;  a token-shaped env var: cases 0, controls 2
+
+  capability        cases                        controls                    
+  credential_read   0r 1n 5?  0%                 3r 18n 39?  14%             
+    bounded: cases 0%-83%, controls 5%-70%
+    -14.3pp (95% CI -34.6pp to +65.6pp, includes zero)
+    widened for the 20 interval comparisons this run printed (z=3.02): -14.3pp (95% CI -47.2pp to +76.6pp, includes zero)
+    INCONCLUSIVE at this n. -14.3pp, interval -47.2pp to +76.6pp, over 1 cases and 21 controls. Neither a difference nor the absence of one. The case side has 5 indeterminate, so the group is between 0.0% and 83.3% whatever this interval says.
+  network_egress    2r 1n 3?  67%                10r 19n 31?  34%            
+    bounded: cases 33%-83%, controls 17%-68%
+    +32.2pp (95% CI -17.2pp to +63.0pp, includes zero)
+    widened for the 20 interval comparisons this run printed (z=3.02): +32.2pp (95% CI -29.5pp to +68.4pp, includes zero)
+    INCONCLUSIVE at this n. +32.2pp, interval -29.5pp to +68.4pp, over 3 cases and 29 controls. Neither a difference nor the absence of one. The case side has 3 indeterminate, so the group is between 33.3% and 83.3% whatever this interval says.
+  external_exec     1r 2n 3?  33%                13r 20n 27?  39%            
+    bounded: cases 17%-67%, controls 22%-67%
+    -6.1pp (95% CI -38.1pp to +42.1pp, includes zero)
+    widened for the 20 interval comparisons this run printed (z=3.02): -6.1pp (95% CI -45.4pp to +53.0pp, includes zero)
+    INCONCLUSIVE at this n. -6.1pp, interval -45.4pp to +53.0pp, over 3 cases and 33 controls. Neither a difference nor the absence of one. The case side has 3 indeterminate, so the group is between 16.7% and 66.7% whatever this interval says.
+  dynamic_code      1r 2n 3?  33%                5r 20n 35?  20%             
+    bounded: cases 17%-67%, controls 8%-67%
+    +13.3pp (95% CI -19.9pp to +60.6pp, includes zero)
+    widened for the 20 interval comparisons this run printed (z=3.02): +13.3pp (95% CI -29.4pp to +70.5pp, includes zero)
+    INCONCLUSIVE at this n. +13.3pp, interval -29.4pp to +70.5pp, over 3 cases and 25 controls. Neither a difference nor the absence of one. The case side has 3 indeterminate, so the group is between 16.7% and 66.7% whatever this interval says.
+
+==========================================================================
+AT THE CAPTURE LEVEL   cases n=42, controls n=87
+  NOT A SECOND MEASUREMENT. 36 of the 42 case captures are @siwatfa/yorn
+  from one account (siwatfa), so a rate here is a rate of republishing and
+  every interval on this row assumes 42 independent draws where there are
+  3. It is printed to show how much the unit changes the answer. The
+  publisher row above is the measurement.
+  pooled median unpacked size (NOT the match, which is per case above): cases 25941767 B, controls 8169 B
+  what this unit could find: With 42 cases and 87 controls, the most this run can find is: every case reaches a capability and at most 69 of 87 controls (79.3%) do. Anything commoner than that in the controls cannot be separated from it at this n, whatever the cases do.
+  ships something no parser reads: cases 37/42, controls 15/87
+  never opened at all (no JavaScript, or past the size bound): cases 0/42, controls 20/87
+  blinded at entry, either way: cases 37/42, controls 29/87
+  reaches a dependency not in the tarball: cases 2/42, controls 52/87
+  credential_read by half — a secret path that reached a call: cases 0, controls 1;  a token-shaped env var: cases 0, controls 19
+
+  capability        cases                        controls                    
+  credential_read   0r 1n 41?  0%                20r 20n 47?  50%            
+    bounded: cases 0%-98%, controls 23%-77%
+    -50.0pp (95% CI -64.8pp to +30.7pp, includes zero)
+    widened for the 20 interval comparisons this run printed (z=3.02): -50.0pp (95% CI -71.6pp to +42.7pp, includes zero)
+    INCONCLUSIVE at this n. -50.0pp, interval -71.6pp to +42.7pp, over 1 cases and 40 controls. Neither a difference nor the absence of one. The case side has 41 indeterminate, so the group is between 0.0% and 97.6% whatever this interval says.
+  network_egress    2r 1n 39?  67%               28r 21n 38?  57%            
+    bounded: cases 5%-98%, controls 32%-76%
+    +9.5pp (95% CI -38.1pp to +40.0pp, includes zero)
+    widened for the 20 interval comparisons this run printed (z=3.02): +9.5pp (95% CI -48.8pp to +46.2pp, includes zero)
+    INCONCLUSIVE at this n. +9.5pp, interval -48.8pp to +46.2pp, over 3 cases and 49 controls. Neither a difference nor the absence of one. The case side has 39 indeterminate, so the group is between 4.8% and 97.6% whatever this interval says.
+  external_exec     1r 3n 38?  25%               17r 37n 33?  31%            
+    bounded: cases 2%-93%, controls 20%-57%
+    -6.5pp (95% CI -30.8pp to +39.7pp, includes zero)
+    widened for the 20 interval comparisons this run printed (z=3.02): -6.5pp (95% CI -37.1pp to +53.0pp, includes zero)
+    INCONCLUSIVE at this n. -6.5pp, interval -37.1pp to +53.0pp, over 4 cases and 54 controls. Neither a difference nor the absence of one. The case side has 38 indeterminate, so the group is between 2.4% and 92.9% whatever this interval says.
+  dynamic_code      36r 3n 3?  92%               6r 37n 44?  14%             
+    bounded: cases 86%-93%, controls 7%-57%
+    +78.4pp (95% CI +60.0pp to +87.3pp, excludes zero)
+    widened for the 20 interval comparisons this run printed (z=3.02): +78.4pp (95% CI +47.0pp to +89.6pp, excludes zero)
+    SEPARATES. dynamic_code is reached by the cases +78.4pp more often than by size-matched packages npm did not remove (family-adjusted CI +47.0pp to +89.6pp, excludes zero). The case side has 3 indeterminate, so the group is between 85.7% and 92.9% whatever this interval says.
+
+==========================================================================
+POST HOC, AND NOT EVIDENCE FROM THIS RUN
+  The secret-path half of credential_read, repaired after the cases were opened: SECRET_PATHS holds joined paths and real code writes path.join(home, ".aws", "credentials"), whose arguments are three strings none of which is in the list. This is what the repaired definition finds. It is not validated by this run and cannot be — a definition changed after seeing the cases is fitted to them — and it is here so the next confirmed sample can be the test of it rather than the third place it is rediscovered.
+
+  credential_read at the publisher-any level
+    cases     frozen 0r 0n 3?  ->  repaired 1r 0n 2?
+    controls  frozen 3r 10n 36?  ->  repaired 3r 10n 36?
+    +76.9pp (95% CI -21.8pp to +95.1pp, includes zero)
+
+WHAT THIS CANNOT SAY
+  - The case side is 42 captures of 6 packages published by 3 npm accounts. Every interval here assumes independent draws and there are 3 independent events in it, so every one of them is narrower than the truth. The publisher-unit rows are the ones to read; the capture-unit rows are printed to show how much the unit changes the answer, not as a second measurement.
+  - 37 of the 42 case captures ship an executable no parser reads — a native binary, WASM, a V8 bytecode cache or unreadable minified code. For those, three of the four capabilities cannot be answered at all, and a two-valued analysis would have recorded them as reaching nothing: the malicious side looking cleaner than the control because it is better hidden.
+  - The control is drawn through the SAME capture filter as the cases. Both capture reasons are enriched populations — 'quarantine-no-genome' keeps everything matching the three conjuncts of the observed class, 'watcher-threshold' keeps whatever scored high — so this compares the confirmed removals against the rest of what the filter kept, not against npm. A difference here does not transfer to the ecosystem without measuring the filter's own selection, which this run does not do.
+  - "Not withdrawn" is as good as the removal record. It unions five records — npm's 0.0.1-security placeholder in the takedown log, the sweep's own list, the deletions the change feed reported, the unpublish times in the TTR log, and every capture this project has labelled — and a package npm removes tomorrow is still in the control today. That error runs against the difference: it puts malicious packages in the control group, so a difference that survives it is not created by it.
+  - Indeterminate is not evenly distributed: 37 of 42 cases (88%) and 29 of 87 controls (33%) could not be read at all. That is two different failures counted together, because they have the same consequence: 37 cases and 15 controls ship something no parser reads, and 0 cases and 20 controls were never opened (no JavaScript in the archive, or past the size bound). Where the two sides are blinded at different rates, the rate over the determinate members is comparing two different subsets and the bounds are the honest reading.
+  - Reachability is package-local. A package that reaches a declared dependency hands control to code that is not in this tarball and was not analysed; `externalModules` counts those packages so the bound can be read.
+  - Three of the four capabilities are answered by which module is reached, which is what the code CAN do and never what it does. A package that requires child_process and never calls it is reported as reaching external_exec, correctly.
+  - credential_read is the exception and needs an argument, so its negative is the weakest of the four: it says no path naming a secret was demonstrated, over the call sites whose arguments could be read.
+  - dynamic_code is reached by the same facts that blind the other three. It is closer to "this package hides what it does" than to a capability in its own right, and a run where it is the only thing that fires is a run that measured opacity.
+  - Nothing here scores. A capability is not a verdict, the four are not weighted, and no number in this module contributes a point to anything.
+
+  The equivalence margin was 20%, declared before the run, and the units were
+  capture, package, publisher, package-any, publisher-any with publisher the primary. Neither was chosen after seeing a number.
+
+Saved to capability-results/capability-control-2026-08-19-v1.4.0.json
+

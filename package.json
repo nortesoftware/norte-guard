@@ -1,6 +1,6 @@
 {
   "name": "norte-guard",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "El copiloto de la cuarentena npm. No te dice espera — te dice qué cambió, por qué es sospechoso, y si ya puedes pasar.",
   "type": "module",
   "bin": {

@@ -131,7 +131,8 @@ a false `PASS`.
 The genome is a deterministic function of public data: anyone can recompute it
 and get the same answer. We do not ask for trust, we try to make it unnecessary.
 
-Details: [docs/methodology.md](docs/methodology.md).
+Details: [docs/methodology.md](docs/methodology.md). The capability run and
+the review that corrected it: [docs/audit-a5.md](docs/audit-a5.md).
 
 ## Why not Socket, Aikido or Snyk
 

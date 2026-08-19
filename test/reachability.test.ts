@@ -418,7 +418,11 @@ describe('shapes that broke the corpus pass', () => {
     const src = `let m; ` + Array.from({ length: 20_000 }, (_, i) =>
       `m = require('mod${i % 40}')`).join('; ')
 
-    expect(() => analyzeModuleSource(src)).not.toThrow()
+    // Analysed once, not twice. Both assertions were being paid for separately
+    // — 20,000 statements is around three seconds on a small machine — and two
+    // of them is over vitest's five-second default, which made this fail under
+    // load for a reason that had nothing to do with what it tests. A call that
+    // returns a result did not throw.
     const result = analyzeModuleSource(src)
     expect(result.origins.length).toBeGreaterThan(0)
     // 40 distinct modules, however many statements name them.
@@ -427,7 +431,6 @@ describe('shapes that broke the corpus pass', () => {
 
   it('a deeply chained expression does not overflow the evaluator', () => {
     const src = `const fs = require('fs'); fs` + '.a'.repeat(2_000)
-    expect(() => analyzeModuleSource(src)).not.toThrow()
     expect(analyzeModuleSource(src).origins.some(o => o.module === 'fs')).toBe(true)
   })
 

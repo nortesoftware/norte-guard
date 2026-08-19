@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto'
 import type { CapturedFacts, PackageSource, SourceInfo } from './source.js'
 import type { Packument } from './packument.js'
 import { defaultSource } from './source.js'
-import { putObject, getObject, appendIndex } from './object-store.js'
+import { putObject, getObject, appendIndex, objectPath } from './object-store.js'
 
 export interface NgpackManifest {
   version: 1
@@ -172,15 +172,40 @@ export class NgpackSource implements PackageSource {
     for (const ver of manifest.versionsIncluded) {
       // The store verifies on read, since the file name is the hash.
       if (manifest.objectStore && manifest.objects?.[ver]) {
-        try {
-          tarballs[ver] = getObject(manifest.objectStore, manifest.objects[ver]!)
-        } catch (e) {
-          const message = e instanceof Error ? e.message : String(e)
-          if (message.startsWith('corrupt object')) {
-            throw new Error(`.ngpack ${ngpackPath}: ${message}`)
+        // The capture's own parent first, and only then the path the manifest
+        // recorded. `objectStore` is whatever the watcher was given —
+        // "./captures", "norte-guard-captures/captures" — relative to the
+        // directory it happened to be running in, so following it from anywhere
+        // else looks in the wrong place, or in a different corpus that happens
+        // to sit under the current one.
+        //
+        // corpus.ts already resolves it this way and the two disagreeing is not
+        // cosmetic: tarballPresent counted eleven captures with bytes and this
+        // reader reported all eleven as "bytes are no longer in the object
+        // store". A denominator built on the first and a measurement built on
+        // the second describe different corpora.
+        //
+        // rotateCaptures carries the same fix with the same reasoning; this is
+        // the read side of it.
+        const hash = manifest.objects[ver]!
+        let loaded = false
+
+        for (const root of [join(ngpackPath, '..'), manifest.objectStore]) {
+          if (!existsSync(objectPath(root, hash))) continue
+          try {
+            tarballs[ver] = getObject(root, hash)
+            loaded = true
+          } catch (e) {
+            const message = e instanceof Error ? e.message : String(e)
+            // Tampering fails loudly wherever it is found; absence does not.
+            if (message.startsWith('corrupt object')) {
+              throw new Error(`.ngpack ${ngpackPath}: ${message}`)
+            }
           }
-          missingTarballs.push(ver)
+          break
         }
+
+        if (!loaded) missingTarballs.push(ver)
         continue
       }
 
@@ -412,12 +437,27 @@ export interface CaptureComposition {
   platformFamily: string | null
 }
 
+// Why a capture holds a packument and no tarball. Recorded rather than left to
+// be inferred from an empty `versionsIncluded`, because "the bytes were refused
+// by policy" and "the bytes were lost by a wipe" are the same shape on disk and
+// opposite facts about the corpus: one is a knowable exclusion that every
+// denominator can be corrected for, the other is a defect.
+export interface TarballRefusal {
+  reason: 'over-capture-cap'
+  // What the packument declared, and what the cap was, so the decision can be
+  // re-made later against a different cap without asking the registry.
+  unpackedSize: number
+  capBytes: number
+}
+
 export interface CaptureMetadata {
   package: string
   version: string
   capturedAt: string
   score: number
   label: CaptureLabel
+  // Present only when the tarball was deliberately not downloaded.
+  tarballRefused?: TarballRefusal
   labeledAt?: string
   labelSource?: string
   // Selection is part of the evidence: a capture chosen by a detector with a

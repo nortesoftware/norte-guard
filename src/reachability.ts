@@ -11,9 +11,14 @@
 // the ORIGIN of a value and follows it.
 //
 // It answers one question: **can this code reach X?** It does not answer whether
-// reaching X is dangerous. That is A3, and A3 needs confirmed samples this
-// project does not have yet: two with bytes, not eight. Deciding what is
-// malicious on n=2 would be a preference wearing a measurement's clothes.
+// reaching X is dangerous. That is A3, which lives in capabilities.ts and reads
+// its answers off this graph without changing it.
+//
+// This paragraph used to end "A3 needs confirmed samples this project does not
+// have yet: two with bytes, not eight", and the corpus now holds 42 with bytes.
+// What it turned out to hold is 42 captures of six packages from three npm
+// accounts, so the sentence was right about the reason and wrong about the
+// number that would fix it — capability-control.ts is where that is counted.
 //
 // Where the trail is lost, it is recorded as lost. Never as absent, and never as
 // a pass — that is the discipline A4 exists to enforce and this module inherits
@@ -102,6 +107,14 @@ export type LostReason =
   | 'unresolved-callee'
   | 'depth-limit'
   | 'unresolved-import'
+  // The three per-module bounds, each naming what it stopped collecting rather
+  // than collapsing into `depth-limit`. The walk did not stop: it kept going and
+  // stopped WRITING DOWN one kind of fact, so only the capabilities that read
+  // that kind of fact are blinded. Folding them into depth-limit would blind all
+  // four and move numbers that nothing has actually made unknowable.
+  | 'origin-bound'
+  | 'ambient-bound'
+  | 'argument-bound'
 
 export interface LostPoint {
   reason: LostReason
@@ -118,6 +131,64 @@ export interface LostPoint {
 export interface Value {
   origins: Origin[]
   lost: LostPoint[]
+}
+
+// ---------------------------------------------------------------------------
+// What is already there, without a door
+// ---------------------------------------------------------------------------
+
+// The three gates are the three ways a MODULE arrives. They are not the three
+// ways a capability arrives, and the difference is not a hole in the model above
+// — it is a fact about the language. `process.env`, `fetch`, `eval` and
+// `Function` are ambient: nothing imports them, they are in scope before the
+// first line of the file runs, and there is no origin to follow back because
+// they were never handed over by anything.
+//
+// So they are recorded here, separately, and deliberately NOT added to the
+// module list. A pseudo-module called `fetch` in `reachable` would appear in
+// every module-prevalence table this project has already published and change
+// comparisons that were made without it.
+//
+// The one thing this cannot do is tell the global from a local of the same name
+// in a scope it never entered: a parameter named `process` inside a function no
+// call site reaches is not in any Scope this walker built. Names bound where the
+// walker DID look are checked and skipped. The residue is a known
+// overcount in one direction, and it is stated rather than papered over.
+export type Ambient = 'process.env' | 'fetch' | 'eval' | 'Function'
+
+export interface AmbientUse {
+  what: Ambient
+  // For `process.env`, the variable read, when the property was written where a
+  // reader can see it. Null is not "no name": it is `process.env` reached with
+  // the name decided elsewhere — `const e = process.env`, or a computed key —
+  // and it has to stay tellable from a name that was read and found harmless.
+  name: string | null
+  line: number | null
+  file?: string
+}
+
+// A static string that flowed into a call on a value this analysis was already
+// following. `readFileSync('/home/u/.npmrc')` is two facts — fs is reached, and
+// this is what was handed to it — and the second one only exists at a call site
+// whose callee has an origin. It is not a text search: a literal sitting in a
+// file nothing calls does not appear here, which is the whole difference.
+export interface CallArgument {
+  // The module the callee value came from, and the member path taken off it.
+  // `path.join` is module 'path', path ['join'].
+  module: string | null
+  memberPath: string[]
+  // Null is an argument that did not fold — a variable, a parameter, the result
+  // of another call. It is recorded because it is the difference between "this
+  // package hands its filesystem calls nothing but './package.json'" and "this
+  // package hands its filesystem calls something nobody read", and those two are
+  // opposite answers that look identical if only the readable ones are kept.
+  value: string | null
+  // Which argument it was. Kept because `join(home, '.aws', 'credentials')` is
+  // three arguments that are one path, and a consumer that wants to know what
+  // path was built has to be able to put them back in order.
+  index: number
+  line: number | null
+  file?: string
 }
 
 const EMPTY: Value = { origins: [], lost: [] }
@@ -269,6 +340,10 @@ export interface ModuleAnalysis {
   // What the module hands out, so a caller following a relative require can keep
   // going through it.
   exports: Value
+  // The ambient bindings above, which have no gate to arrive through.
+  ambient: AmbientUse[]
+  // Static strings at call sites on followed values.
+  callArguments: CallArgument[]
 }
 
 export interface AnalyzeOptions {
@@ -305,6 +380,18 @@ const MAX_PATH_DEPTH = 12
 // Nothing memoises, because a body's result depends on the arguments bound into
 // it; what is bounded instead is how many times any body may be entered.
 const MAX_BODY_WALKS = 300
+
+// Bounded for the same reason everything else here is bounded, and with the same
+// consequence: past the bound the module is not described further, and the
+// answer downstream must be "not established", never "not there". A minified
+// bundle writes tens of thousands of call sites and most of them hand a string
+// to something.
+const MAX_AMBIENT_PER_MODULE = 512
+const MAX_CALL_ARGUMENTS_PER_MODULE = 512
+
+// One argument string longer than this is not a path, a URL or a variable name,
+// and keeping it whole means keeping a copy of a bundled data blob per call site.
+const MAX_ARGUMENT_LENGTH = 512
 
 export function analyzeModuleSource(
   source: string,
@@ -344,6 +431,8 @@ export function analyzeModuleSource(
           file: options.file,
         }],
         exports: EMPTY,
+        ambient: [],
+        callArguments: [],
       }
     }
   }
@@ -362,8 +451,18 @@ class ModuleAnalyzer {
   // Keyed, not appended: the same lost point arrives once per route that reaches
   // it, and every route through a combinator library reaches all of them.
   private readonly lostByKey = new Map<string, LostPoint>()
+  // Keyed for the same reason: one `process.env.NPM_TOKEN` inside a function
+  // called from forty places is one fact about the file.
+  private readonly ambientByKey = new Map<string, AmbientUse>()
+  private readonly callArgumentsByKey = new Map<string, CallArgument>()
   private readonly functions = new Map<string, AstNode>()
   private readonly handledMembers = new WeakSet<AstNode>()
+  // A `process.env` whose variables were already read off a destructuring
+  // pattern. Recording it a second time from the member expression would add a
+  // nameless use beside the named ones, and a nameless use is the thing that
+  // makes an answer indeterminate — so the file would go unreadable on account
+  // of the one form this analysis reads best.
+  private readonly namedEnvReads = new WeakSet<AstNode>()
   private bodyWalks = 0
   private readonly strings = new Map<string, string | null>()
   private exported: Value = EMPTY
@@ -393,6 +492,8 @@ class ModuleAnalyzer {
       origins: [...this.originsByKey.values()],
       lost: [...this.lostByKey.values()],
       exports: this.exported,
+      ambient: [...this.ambientByKey.values()],
+      callArguments: [...this.callArgumentsByKey.values()],
     }
   }
 
@@ -450,7 +551,21 @@ class ModuleAnalyzer {
   }
 
   private record(origin: Origin): void {
-    if (this.originsByKey.size >= MAX_MODULE_ORIGINS) return
+    if (this.originsByKey.size >= MAX_MODULE_ORIGINS) {
+      // Past this point the module's origin list is frozen, so a module reached
+      // afterwards is never written down and every capability that is answered
+      // by "which module is reached" — all four — becomes unestablished, not
+      // absent. One point per file: lostKey dedupes on reason+file+line+detail
+      // and the line is deliberately null, so a bundle that trips this ten
+      // thousand times records it once.
+      this.noteLost({
+        reason: 'origin-bound',
+        detail: `more than ${MAX_MODULE_ORIGINS} module origins in one file; the rest were not recorded`,
+        line: null,
+        file: this.file,
+      })
+      return
+    }
     this.originsByKey.set(originKey(origin), origin)
   }
 
@@ -465,6 +580,62 @@ class ModuleAnalyzer {
     this.lostByKey.set(lostKey(point), point)
   }
 
+  private noteAmbient(what: Ambient, name: string | null, node: unknown): void {
+    if (this.ambientByKey.size >= MAX_AMBIENT_PER_MODULE) {
+      // Ambient uses are the whole evidence for three of the four: process.env
+      // for credential_read, the global fetch for network_egress, eval and
+      // Function for dynamic_code. external_exec is answered by reaching
+      // child_process and never by an ambient, so it is the one this does not
+      // touch.
+      this.noteLost({
+        reason: 'ambient-bound',
+        detail: `more than ${MAX_AMBIENT_PER_MODULE} ambient uses in one file; the rest were not recorded`,
+        line: null,
+        file: this.file,
+      })
+      return
+    }
+    const use: AmbientUse = { what, name, line: lineOf(node), file: this.file }
+    this.ambientByKey.set(`${what}|${name ?? '?'}|${use.file ?? ''}|${use.line ?? ''}`, use)
+  }
+
+  private noteCallArgument(origin: Origin, value: string | null, index: number, node: unknown): void {
+    if (this.callArgumentsByKey.size >= MAX_CALL_ARGUMENTS_PER_MODULE) {
+      // Only credential_read reads arguments — it is the one capability that
+      // needs to know WHICH path was handed to a filesystem call. The other
+      // three are answered by module reachability, which this bound does not
+      // touch, so blinding them here would throw away answers that are still
+      // sound.
+      this.noteLost({
+        reason: 'argument-bound',
+        detail: `more than ${MAX_CALL_ARGUMENTS_PER_MODULE} call arguments in one file; the rest were not recorded`,
+        line: null,
+        file: this.file,
+      })
+      return
+    }
+    // Truncated rather than dropped: a 4KB string handed to a filesystem call is
+    // still an argument that was read, and dropping it would grade as "nobody
+    // looked" something nobody needs to look at twice.
+    const kept = value === null ? null : value.slice(0, MAX_ARGUMENT_LENGTH)
+    const line = lineOf(node)
+    const argument: CallArgument = {
+      module: origin.module,
+      memberPath: origin.path,
+      value: kept,
+      index,
+      line,
+      file: this.file,
+    }
+    // The call site is part of the key, not only the value. Without it two
+    // `join(home, '.aws', X)` calls on consecutive lines share one record of
+    // '.aws', and the second path cannot be put back together from what is left.
+    this.callArgumentsByKey.set(
+      `${origin.module ?? '?'}|${origin.path.join('.')}|${line ?? '?'}|${index}|${kept ?? 'unread'}`,
+      argument
+    )
+  }
+
   // -------------------------------------------------------------------------
 
   private walkStatements(root: unknown, scope: Scope, depth: number): void {
@@ -473,6 +644,12 @@ class ModuleAnalyzer {
 
       switch (n.type) {
         case 'VariableDeclarator':
+          // `const { NPM_TOKEN } = process.env` reads a named variable, and the
+          // name is on the pattern rather than on the member expression. Without
+          // this the destructuring form recorded process.env with no name — true,
+          // and it would have made every credential answer indeterminate for the
+          // form most code actually uses.
+          this.noteDestructuredEnv(n.id, n.init, scope)
           this.bindPattern(n.id, this.evaluate(n.init, scope, depth), scope, depth)
           break
 
@@ -733,11 +910,74 @@ class ModuleAnalyzer {
       current = next
     }
 
+    this.noteProcessEnv(current, chain, scope)
+
     let value = this.evaluate(current, scope, depth)
     for (let i = chain.length - 1; i >= 0; i--) {
       value = this.applyMember(chain[i]!, value, scope)
     }
     return value
+  }
+
+  // `process.env.NPM_TOKEN`, and every shape of it that still reads the same
+  // variable. The chain arrives outermost-first, so the link nearest the base is
+  // last: chain[len-1] is `process.<x>` and chain[len-2] is `process.env.<y>`.
+  //
+  // A name bound anywhere the walker looked is a local, and a local named
+  // `process` is not the process. `scope.get` returns a Value for any name that
+  // was bound — including one bound to nothing — so being absent from the scope
+  // chain is what "global" means here.
+  private noteProcessEnv(base: AstNode, chain: AstNode[], scope: Scope): void {
+    if (base.type !== 'Identifier' || base.name !== 'process') return
+    if (scope.get('process') !== undefined) return
+
+    const envLink = chain[chain.length - 1]
+    if (!envLink || this.memberName(envLink, scope) !== 'env') return
+    if (this.namedEnvReads.has(envLink)) return
+
+    // `process.env` with nothing read off it here: the read happens through a
+    // binding, or with a key computed at runtime. Recorded with no name, which
+    // is the difference between a variable that was read and found harmless and
+    // one nobody could name.
+    const read = chain[chain.length - 2]
+    this.noteAmbient('process.env', read ? this.memberName(read, scope) : null, envLink)
+  }
+
+  private noteDestructuredEnv(id: unknown, init: unknown, scope: Scope): void {
+    const pattern = id as AstNode | undefined
+    const source = init as AstNode | undefined
+    if (pattern?.type !== 'ObjectPattern' || source?.type !== 'MemberExpression') return
+
+    const object = source.object as AstNode | undefined
+    if (object?.type !== 'Identifier' || object.name !== 'process') return
+    if (scope.get('process') !== undefined) return
+    if (this.memberName(source, scope) !== 'env') return
+
+    this.namedEnvReads.add(source)
+
+    for (const raw of (pattern.properties ?? []) as AstNode[]) {
+      if (raw.type === 'RestElement') {
+        // `const { ...rest } = process.env` takes every variable there is, and
+        // naming none of them is exactly what that means.
+        this.noteAmbient('process.env', null, raw)
+        continue
+      }
+      const key = raw.key as AstNode | undefined
+      const name = key?.type === 'Identifier' ? String(key.name)
+                 : key?.type === 'Literal' && typeof key.value === 'string' ? key.value
+                 : staticString(key, scope, this.strings)
+      this.noteAmbient('process.env', name, raw)
+    }
+  }
+
+  // The property of a member expression when it can be read: written out, or
+  // computed from something that folds. Null is a name decided at runtime.
+  private memberName(node: AstNode, scope: Scope): string | null {
+    const property = node.property as AstNode | undefined
+    if (!node.computed && property?.type === 'Identifier' && typeof property.name === 'string') {
+      return property.name
+    }
+    return staticString(property, scope, this.strings)
   }
 
   private applyMember(n: AstNode, object: Value, scope: Scope): Value {
@@ -802,6 +1042,13 @@ class ModuleAnalyzer {
     // read, and A4 is where that lands.
     const calleeName = this.calleeName(n.callee)
     if (calleeName === 'eval' || calleeName === 'Function') {
+      // Recorded whether or not the body could be read. The lost point below
+      // only fires when the body is built at runtime, so before this the case
+      // that IS readable — `Function("return require('fs')")` — left no trace
+      // that code had been compiled at all, and a phase asking "does this
+      // construct code" would have answered no about a call to Function.
+      if (!scope.get(calleeName)) this.noteAmbient(calleeName, null, n)
+
       const literal = staticString(args[args.length - 1], scope, this.strings)
       if (literal === null) {
         this.lose('dynamic-eval', `${calleeName}() over a body built at runtime`, n)
@@ -811,6 +1058,10 @@ class ModuleAnalyzer {
       const inner = analyzeModuleSource(literal, { file: this.file, maxCallDepth: this.maxDepth })
       for (const o of inner.origins) this.record({ ...o, route: [...o.route, 'argument'] })
       for (const l of inner.lost) this.noteLost(l)
+      for (const a of inner.ambient) this.noteAmbient(a.what, a.name, n)
+      for (const c of inner.callArguments) this.noteCallArgument(
+        { gate: 'require', module: c.module, path: c.memberPath, route: [] }, c.value, c.index, n
+      )
       return merge(fromArguments, { origins: inner.origins, lost: inner.lost })
     }
 
@@ -825,6 +1076,11 @@ class ModuleAnalyzer {
       return merge(fromArguments, this.callLocal(this.functions.get(calleeName)!, args, scope, depth))
     }
 
+    // `fetch(...)`, and the two ways of spelling it that still call the same
+    // function. Nothing imports it: it has been in scope since Node 18, so there
+    // is no gate to have come through and no origin to follow back.
+    if (this.isGlobalFetch(n.callee, scope)) this.noteAmbient('fetch', null, n)
+
     // Calling the result of something we followed: `const r = fs.readFileSync;
     // r(path)` returns whatever it returns, which we do not model. The callee's
     // own origins still count — the capability was reached to call it.
@@ -836,7 +1092,33 @@ class ModuleAnalyzer {
       }
     }
 
+    // What was handed to it, when the callee is something with a known origin
+    // and the argument is a string a reader can see. Recorded per origin: a
+    // callee value that carries two origins was reached two ways and the
+    // argument went to both.
+    if (callee.origins.length > 0) {
+      args.forEach((arg, index) => {
+        const folded = staticString(arg, scope, this.strings)
+        for (const origin of callee.origins) this.noteCallArgument(origin, folded, index, n)
+      })
+    }
+
     return merge(fromArguments, callee)
+  }
+
+  // Whether a callee is the global fetch rather than something of the same name.
+  // The member forms are the ones a bundler emits; `globalThis` and `global` are
+  // not bindable, and `window` is checked the same way for symmetry.
+  private isGlobalFetch(callee: unknown, scope: Scope): boolean {
+    const name = this.calleeName(callee)
+    if (name === 'fetch') return scope.get('fetch') === undefined
+
+    const c = callee as AstNode | undefined
+    if (c?.type !== 'MemberExpression') return false
+    const object = c.object as AstNode | undefined
+    if (object?.type !== 'Identifier') return false
+    if (!['globalThis', 'global', 'window', 'self'].includes(String(object.name))) return false
+    return this.memberName(c, scope) === 'fetch'
   }
 
   private callLocal(fn: AstNode, args: unknown[], scope: Scope, depth: number): Value {
@@ -944,6 +1226,12 @@ export interface PackageReachability {
   // lost trail is an analysis limit.
   unresolvedLocal: string[]
   lost: LostPoint[]
+  // The ambient bindings, gathered across every file reached. Kept out of
+  // `reachable` on purpose: see the comment on AmbientUse.
+  ambient: AmbientUse[]
+  // Static strings that reached a call on a followed value, and the call sites
+  // where the argument could not be read.
+  callArguments: CallArgument[]
 }
 
 const ENTRY_EXTENSIONS = ['', '.js', '.mjs', '.cjs', '.json', '/index.js', '/index.mjs', '/index.cjs']
@@ -1050,6 +1338,8 @@ export function analyzePackage(input: {
   const lost: LostPoint[] = []
   const unresolvedLocal: string[] = []
   const byModule = new Map<string, ReachableModule>()
+  const ambient = new Map<string, AmbientUse>()
+  const callArguments = new Map<string, CallArgument>()
 
   const queue = [...entryPoints]
   const seen = new Set<string>(queue)
@@ -1071,6 +1361,20 @@ export function analyzePackage(input: {
 
     const result = analyzeModuleSource(source, { file })
     for (const point of result.lost) lost.push({ ...point, file })
+
+    // Deduplicated across the package, not only within a file: a bundle that
+    // inlines the same helper into four entry points reads the same variable
+    // four times and it is one fact about the package.
+    for (const use of result.ambient) {
+      ambient.set(`${use.what}|${use.name ?? '?'}|${file}|${use.line ?? ''}`, { ...use, file })
+    }
+    for (const argument of result.callArguments) {
+      callArguments.set(
+        `${argument.module ?? '?'}|${argument.memberPath.join('.')}|${file}|` +
+        `${argument.line ?? '?'}|${argument.index}|${argument.value ?? 'unread'}`,
+        { ...argument, file }
+      )
+    }
 
     for (const origin of result.origins) {
       if (origin.module === null) continue
@@ -1117,5 +1421,7 @@ export function analyzePackage(input: {
     reachable: [...byModule.values()].sort((a, b) => a.module.localeCompare(b.module)),
     unresolvedLocal: [...new Set(unresolvedLocal)],
     lost,
+    ambient: [...ambient.values()],
+    callArguments: [...callArguments.values()],
   }
 }

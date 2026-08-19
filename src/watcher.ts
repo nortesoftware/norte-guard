@@ -39,6 +39,7 @@ import {
   DEFAULT_DAILY_BYTES,
   DEFAULT_TOTAL_BYTES,
   DEFAULT_QUARANTINE,
+  DEFAULT_MAX_CAPTURE_BYTES,
   QUARANTINE_REASON,
   type QuarantinePolicy,
 } from './capture-budget.js'
@@ -124,6 +125,9 @@ export interface WatcherConfig {
   dailyByteBudget?: number
   // Total size of captures/ before the oldest unconfirmed ones are rotated out.
   maxCaptureBytes?: number
+  // The largest package the SCORE path will download the bytes of, by the
+  // unpacked size the packument declares. Quarantine has its own, smaller, cap.
+  maxCaptureUnpackedBytes?: number
   lagAlertThreshold?: number
   familyWindowMs?: number
   quarantine?: Partial<QuarantinePolicy>
@@ -183,6 +187,7 @@ const coverage = {
   coalesced: 0,
   familyRedundant: 0,
   overBudget: 0,
+  tarballRefusedForSize: 0,
   capturedBytes: 0,
   quarantined: 0,
   quarantineExpired: 0,
@@ -483,10 +488,16 @@ async function analyzePackage(
     // 0.75% and equally consistent with a filter that is simply broken, and the
     // two are only told apart by knowing which condition rejected what.
     if (quarantine.enabled && effectiveScore < threshold) {
-      if (!markers.noGenome) coverage.quarantineRejects.withGenome++
-      else if (!markers.young) coverage.quarantineRejects.oldName++
+      // The three conjuncts first, in the order they exclude. `withGenome` is
+      // now the residual and reads 0 by construction: `young` entails
+      // `noGenome`, so nothing reaches that branch. It is kept, and kept last,
+      // because a counter that stays at zero in production is the cheapest
+      // standing proof that the conjunct removed from the definition really did
+      // exclude nothing — and the day it moves, the entailment has broken.
+      if (!markers.young) coverage.quarantineRejects.oldName++
       else if (!markers.tiny) coverage.quarantineRejects.tooLarge++
       else if (markers.hasRepository) coverage.quarantineRejects.withRepository++
+      else if (!markers.noGenome) coverage.quarantineRejects.withGenome++
       else if (currentMeta.unpackedSize > quarantine.maxBytes) coverage.quarantineRejects.overCaptureCap++
       else coverage.quarantineRejects.accepted++
     }
@@ -554,12 +565,26 @@ async function analyzePackage(
         return { outcome: 'analyzed', scored }
       }
 
+      // Too large to be worth its bytes on the score path. The packument is
+      // captured anyway and the refusal is recorded on it: the package stays in
+      // every population and every denominator, and only the tarball is
+      // declined. Quarantine is never refused here — it has its own cap, and
+      // the class it selects is under 100KB by definition.
+      const unpackedCap = config.maxCaptureUnpackedBytes ?? DEFAULT_MAX_CAPTURE_BYTES
+      const refuseTarball = !quarantined && currentMeta.unpackedSize > unpackedCap
+
       const safeName = name.replace(/[@/]/g, '_')
       const dir = join(config.outputDir, 'captures', `${safeName}@${latestVersion}_${now}`)
-      console.log(`${quarantined ? 'QUARANTINE' : 'CAPTURED'} ${name}@${latestVersion}`)
+      console.log(
+        refuseTarball
+          ? `PACKUMENT ONLY ${name}@${latestVersion} (${formatBytes(currentMeta.unpackedSize)} unpacked, cap ${formatBytes(unpackedCap)})`
+          : `${quarantined ? 'QUARANTINE' : 'CAPTURED'} ${name}@${latestVersion}`
+      )
+      if (refuseTarball) coverage.tarballRefusedForSize++
       try {
         await createNgpack(name, dir, {
-          versions: [latestVersion],
+          // An empty list captures the packument and no bytes.
+          versions: refuseTarball ? [] : [latestVersion],
           objectStore: join(config.outputDir, 'captures'),
         })
 
@@ -616,6 +641,13 @@ async function analyzePackage(
           // collected by a detector with a known bug is a draw from what that
           // bug flagged, and a benchmark cannot correct for what it cannot see.
           captureReason: quarantined ? QUARANTINE_REASON : 'watcher-threshold',
+          // The capture reason says which filter selected it; this says what
+          // was kept. Both are needed: a denominator built from the first alone
+          // would count a packument-only capture as a package that was looked
+          // at.
+          tarballRefused: refuseTarball
+            ? { reason: 'over-capture-cap' as const, unpackedSize: currentMeta.unpackedSize, capBytes: unpackedCap }
+            : undefined,
           engineVersion: engineVersion(),
           retainUntil: quarantined
             ? new Date(now + quarantine.retentionDays * 86_400_000).toISOString()
@@ -748,9 +780,14 @@ export async function startWatcher(config: WatcherConfig): Promise<void> {
         `${quarantinePolicy.retentionDays} days`
       : 'Quarantine: disabled'
   )
+  const unpackedCap = config.maxCaptureUnpackedBytes ?? DEFAULT_MAX_CAPTURE_BYTES
   console.log(
     `Daily budget: ${formatBytes(budget.spent)} / ${formatBytes(dailyBytes)} spent today | ` +
     `total cap: ${formatBytes(maxBytes)}`
+  )
+  console.log(
+    `Score path: no tarball above ${formatBytes(unpackedCap)} unpacked — the packument is ` +
+    `captured anyway and the refusal recorded, so the package stays in every denominator`
   )
 
   const rotatedLogs = rotateLogs(config.outputDir)

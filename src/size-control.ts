@@ -11,12 +11,17 @@
 // the comparison group were simply bigger software.
 //
 // So this holds size fixed and varies the class definition itself. The class is
-// four conjuncts:
+// three conjuncts:
 //
-//     no genome  AND  name under 7 days  AND  under 100KB  AND  no repository
+//     name under 7 days  AND  under 100KB  AND  no repository
+//
+// It was four until v1.4.0, and the fourth — "no genome" — was entailed by the
+// first: a name under 7 days cannot have a first analysed version 90 days old,
+// so it excluded 0 of 114,545 marked publications. Removing it left the class
+// byte-identical.
 //
 // Every group here is under 100KB and drawn from the same window. What changes
-// between them is ONE of the other three conjuncts:
+// between them is ONE of the other two conjuncts:
 //
 //   class        no genome, young name, no repository        (the class itself)
 //   +repository  no genome, young name, HAS a repository     (one conjunct)

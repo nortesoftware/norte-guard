@@ -15,6 +15,24 @@ import { deleteObject, listObjects, objectSize, OBJECTS_DIR } from './object-sto
 export const DEFAULT_DAILY_BYTES = 2 * 1024 ** 3
 export const DEFAULT_TOTAL_BYTES = 10 * 1024 ** 3
 
+// The largest package the score path will download the bytes of, measured as the
+// unpacked size the packument declares — which is the only size knowable before
+// paying for the download.
+//
+// Measured on this corpus: 10% of watcher-threshold captures hold 81% of its
+// bytes, and those are the captures the analyser can read least. That segment's
+// byte coverage is 9.79%; 16% of it ships a native binary and 34.8% ships
+// unreadable minified code. So the bytes being refused here are, in the main,
+// bytes nobody can look at.
+//
+// The packument is captured anyway. That is the condition on this cap and not a
+// detail: an analyser that stops capturing large binaries stops being able to
+// measure its own blind spot, and a rate whose denominator quietly lost its
+// largest members is worse than no rate. What is kept is the population; what is
+// refused is the bytes, and the refusal is recorded on the capture so every
+// denominator downstream can be stated over the complete set.
+export const DEFAULT_MAX_CAPTURE_BYTES = 8 * 1024 ** 2
+
 const STATE_FILE = 'capture-budget.json'
 
 interface BudgetState {
@@ -463,6 +481,154 @@ export function sweepQuarantine(
   result.objectSweepRefused = collected.refused
 
   return result
+}
+
+// ---------------------------------------------------------------------------
+// Changing the clock on captures already taken
+// ---------------------------------------------------------------------------
+
+// Retention is written into each capture at the moment it is taken, as an
+// absolute date, and the sweep reads that date rather than today's policy. That
+// is the right shape — a capture carries its own terms — and it has one
+// consequence nobody expected: raising --quarantine-days does nothing for the
+// captures already on the disk. They keep the date the old policy gave them and
+// the sweep takes them on schedule.
+//
+// Which is how a corpus of 3,233 unconfirmed quarantine captures came to be two
+// days from deletion while the verdict they exist to reach takes thirty. This
+// rewrites those dates, and it is deliberately awkward to invoke: it changes
+// the terms recorded on evidence, so it asks for a reason, it refuses to
+// shorten anything, and it does nothing at all unless it is told to apply.
+export const RETENTION_LOG = 'retention-log.ndjson'
+
+export interface RetentionChange {
+  package: string
+  version: string
+  capturedAt: string
+  // Null when the capture never carried a retention date, which is every
+  // capture taken before quarantine existed.
+  from: string | null
+  to: string
+  reason: string
+  extendedAt: string
+  retentionDays: number
+}
+
+export interface RetentionResult {
+  scanned: number
+  changed: RetentionChange[]
+  // Already retained at least that long. Not an error and not a no-op worth
+  // hiding: it is what a second run of the same command looks like.
+  alreadyLonger: number
+  // Labelled captures are kept for good and have no retention date to move.
+  labelled: number
+  unreadable: number
+  dryRun: boolean
+  refused?: string
+}
+
+// Retention runs from the capture, never from now: a capture taken five days ago
+// with 45 days of retention has 40 left, not 45. Measuring from now would hand
+// the oldest captures — the ones closest to an answer — the longest extension,
+// which is backwards.
+export function extendQuarantineRetention(input: {
+  capturesDir: string
+  days: number
+  reason: string
+  now?: number
+  dryRun?: boolean
+}): RetentionResult {
+  const dryRun = input.dryRun ?? true
+  const result: RetentionResult = {
+    scanned: 0, changed: [], alreadyLonger: 0, labelled: 0, unreadable: 0, dryRun,
+  }
+
+  if (!Number.isFinite(input.days) || input.days <= 0) {
+    return { ...result, refused: `${input.days} is not a number of days` }
+  }
+  if (!input.reason.trim()) {
+    return { ...result, refused: 'no reason given, and this changes the terms recorded on evidence' }
+  }
+  if (!existsSync(input.capturesDir)) return result
+
+  const now = input.now ?? Date.now()
+  const extendedAt = new Date(now).toISOString()
+
+  for (const name of readdirSync(input.capturesDir)) {
+    const dir = join(input.capturesDir, name)
+    const metaPath = join(dir, 'capture-metadata.json')
+    if (!existsSync(metaPath)) continue
+
+    let meta: Record<string, unknown>
+    try {
+      meta = JSON.parse(readFileSync(metaPath, 'utf-8')) as Record<string, unknown>
+    } catch {
+      // A capture being written right now reads as half a file. The collector
+      // does not have to be stopped for this, so it has to be survivable.
+      result.unreadable++
+      continue
+    }
+
+    if (meta['captureReason'] !== QUARANTINE_REASON) continue
+    result.scanned++
+
+    const label = meta['label']
+    if (typeof label === 'string' && label !== 'unconfirmed') { result.labelled++; continue }
+
+    const capturedAt = typeof meta['capturedAt'] === 'string' ? meta['capturedAt'] : ''
+    const capturedMs = new Date(capturedAt).getTime()
+    if (!Number.isFinite(capturedMs)) { result.unreadable++; continue }
+
+    const target = new Date(capturedMs + input.days * 86_400_000).toISOString()
+    const current = typeof meta['retainUntil'] === 'string' ? meta['retainUntil'] : null
+
+    // Never shorter. A command that can only lengthen retention cannot delete
+    // anything by being run with the wrong number.
+    if (current !== null && current >= target) { result.alreadyLonger++; continue }
+
+    const change: RetentionChange = {
+      package: String(meta['package'] ?? ''),
+      version: String(meta['version'] ?? ''),
+      capturedAt,
+      from: current,
+      to: target,
+      reason: input.reason,
+      extendedAt,
+      retentionDays: input.days,
+    }
+
+    if (!dryRun) {
+      meta['retainUntil'] = target
+      // In the capture as well as in the log, so a snapshot read on its own
+      // says why its clock does not match the policy that took it.
+      meta['retainUntilSource'] =
+        `extended to ${input.days} days on ${extendedAt.slice(0, 10)}: ${input.reason}`
+      try {
+        writeFileSync(metaPath, JSON.stringify(meta, null, 2))
+      } catch {
+        result.unreadable++
+        continue
+      }
+    }
+
+    result.changed.push(change)
+  }
+
+  if (!dryRun) recordRetentionChanges(input.capturesDir, result.changed)
+  return result
+}
+
+// One line per capture whose terms were changed, beside the expiry log, for the
+// same reason: what happened to a capture has to outlive the capture.
+export function recordRetentionChanges(capturesDir: string, rows: RetentionChange[]): void {
+  if (rows.length === 0) return
+  try {
+    writeFileSync(
+      join(dirname(capturesDir), RETENTION_LOG),
+      rows.map(r => JSON.stringify(r)).join('\n') + '\n',
+      { flag: 'a' }
+    )
+  } catch { /* one lost line does not invalidate the series */ }
 }
 
 export const QUARANTINE_REASON = 'quarantine-no-genome'

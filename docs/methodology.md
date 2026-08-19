@@ -107,3 +107,141 @@ The 24h quarantine (1440 min) would have given **22× margin** against Shai-Hulu
 norte-guard detects packument anomalies in **< 1 minute** from publication.
 
 ---
+
+## A3 — four capabilities, over the graph A1/A2 already builds
+
+`reachability.ts` answers "can this code reach X". It said, in its own header,
+that it would not answer whether reaching X is dangerous, because the project
+had two confirmed samples with bytes and deciding malice on n=2 is a preference
+wearing a measurement's clothes.
+
+There are 42 confirmed captures with bytes now. Four capabilities, fixed before
+the run:
+
+| capability | reached when |
+|---|---|
+| `credential_read` | a string naming a secret reached a filesystem or path call, **or** `process.env` was read for a token-shaped variable |
+| `network_egress` | `net`, `http`, `https` or `dgram` is reached, or the global `fetch` is called |
+| `external_exec` | `child_process` is reached |
+| `dynamic_code` | `vm` is reached, or `eval`/`Function` is called, or a specifier is decided at runtime |
+
+Three of the four are pure reachability and add no patterns. The fourth needs an
+argument — nearly every package on npm reaches `fs`, and
+`readFileSync('./package.json')` is not a credential read — so two frozen lists
+exist, and they are applied only to strings that **demonstrably flowed into a
+call on a value the graph was already following**. A literal sitting in a file
+nothing calls does not qualify, and every result carries the count of secret
+paths only a text search would have found, so the difference between this and
+`grep` is measured on every package rather than claimed once.
+
+### The three gates are the three ways a *module* arrives
+
+They are not the three ways a capability arrives. `process.env`, `fetch`, `eval`
+and `Function` are ambient: nothing imports them, and there is no origin to
+follow back because nothing ever handed them over. They are recorded in their
+own field, deliberately **not** in the module list — a pseudo-module named
+`fetch` in `reachable` would appear in every module-prevalence table this
+project has already published and change comparisons made without it. Measured:
+over 132 corpus captures, the six pre-existing fields of the graph are identical
+before and after the change, in 132 of 132.
+
+### Three answers, never two
+
+`reached`, `not-reached`, `indeterminate`. Every kind of lost trail is mapped to
+what it can hide: a specifier decided at runtime can be any module, so it blinds
+the three module capabilities — and it *is* `dynamic_code`, so one fact blinds
+three answers and settles the fourth. `reached` always beats blinded.
+
+This is not fastidiousness. **37 of the 42 confirmed captures ship an executable
+no parser reads** — `@siwatfa/yorn` puts its entire payload in a 15MB V8
+bytecode cache — so a two-valued analysis records them as reaching nothing at
+all, and the malicious cohort comes out cleaner than its control **because it is
+better hidden.**
+
+## A5 — does any of it separate?
+
+Cases: every `confirmed_malicious` capture that still holds bytes. Controls:
+drawn from the collector's own captures, matched **on size** (nearest neighbour
+on log unpacked size, within a factor of two — worst measured pair 1.60×), from
+the **same days**, and **not withdrawn** by any of five records on disk.
+
+The caliper is re-applied when the match is expanded. The match draws one
+representative capture per control package; what gets measured is every capture
+of that package in the window, and v1.3.0 never re-checked the band on that
+second set. Twelve captures of three packages were outside it, the worst
+`@vanillaskyai/sdk` at **11.39×** against a case it was matched to at 1.02× —
+inside the one arm that carried the run's only `SEPARATES` row. They are dropped
+and listed.
+
+**The 42 are 6 packages published by 3 npm accounts.** One of them republished
+36 times in 38 hours. Every rate is therefore computed at five units — capture,
+package, publisher, and the two `-any` unions — and the publisher one is
+primary. The capture row is printed beside it to show how much the unit changes
+the answer:
+
+| unit | `dynamic_code`, cases minus controls |
+|---|---|
+| capture (n=42 vs 87) | **+78.4pp**, family-adjusted CI +47.0 to +89.6 — excludes zero |
+| publisher (n=3 vs 49) | +72.2pp, family-adjusted CI −24.3 to +91.8 — includes zero |
+
+Same packages, same bytes, same analysis. The first row is one operator counted
+36 times, and it is printed last for that reason.
+
+**What the run could have found is printed before what it did.** At three
+independent cases and forty-nine controls, the most it can establish is "every
+case reaches it and at most 10 of 49 controls (20.4%) do". **All four** control
+rates at that unit are above that ceiling — 23%, 48%, 48% and 28% — so the run
+was never able to separate any of them, whatever the cases did. A rate that
+could never have separated is not a null result.
+
+v1.3.0 said "three of the four" here. That count was the capture unit's rates
+measured against the publisher unit's ceiling; against their own ceiling of
+79.3% none of them clears it. The one that fell out of the list was
+`dynamic_code`, which is the row the table above highlights.
+
+The honest summary at the primary unit: **nothing is established.** Two of the
+four are not calculable at all — every case is indeterminate, and a rate over an
+empty denominator is not a rate.
+
+One thing the run says about a definition rather than a package.
+`credential_read` is a disjunction, and the two halves behave nothing alike: of
+the 20 controls that reach it, **19 do so by reading a token-shaped environment
+variable and 1 by a path that named a secret.** Half of npm's build tooling
+reads `*_TOKEN`. Reported apart on every group for that reason, and the obvious
+consequence — that these are two capabilities and not one — is left for a phase
+that can test it on samples it did not come from.
+
+### What the six actually reach
+
+| package | account | credential | network | exec | dynamic |
+|---|---|---|---|---|---|
+| `@siwatfa/yorn` (36 captures) | siwatfa | ? | ? | ? | **yes** |
+| `leb128x` | ferrousdev | ? | **yes** | ? | ? |
+| `kit-hydration-vim` | a_soclav | ? | ? | **yes** | ? |
+| `sui-gql-core` | ferrousdev | no | **yes** | no | no |
+| `svelte-goal-vim` | a_soclav | ? | no | no | no |
+| `bcs-core` | ferrousdev | ? | ? | ? | ? |
+
+`?` is not a shrug. `@siwatfa/yorn` is bytecode; `bcs-core` and `leb128x@1.0.0`
+`require('./_perf.js')` and do not ship it — the payload arrives in the next
+version, which is why the run also reports every unit as a union over all
+captures of it.
+
+### Two things the run declares about itself
+
+**Contamination.** Two of the six case packages are named in this codebase as
+the reason a bound exists — `@siwatfa/yorn` for the function-body walk limit,
+`kit-hydration-vim` for the magic-byte file classifier — and both bounds blind
+capability answers. Excluding the packages would not remove their influence on
+how everything else is measured, so the run states them and then measures
+whether either bound decided its own package's answer. It did not: **0 answers
+rest on either bound alone.**
+
+**A post-hoc definition, held apart.** `SECRET_PATHS` holds joined paths and
+real code writes `path.join(home, '.aws', 'credentials')`, whose arguments are
+three strings none of which is in the list. The repaired definition reassembles
+each `path.join` call site and finds `.aws/credentials` in `leb128x@1.0.1` — a
+Sui keystore and AWS credential stealer that exfiltrates over the GitHub API.
+That result is printed under its own heading and excluded from the evidence,
+because a definition changed after seeing the cases is fitted to them. The next
+confirmed sample is the test of it.

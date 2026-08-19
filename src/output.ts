@@ -159,3 +159,22 @@ export function exitCodeForVerdict(
   if (verdict === 'INSUFFICIENT_HISTORY' && options.strictNewPackages) return 1
   return 0
 }
+
+// Soft-wrap a paragraph to a column, on word boundaries. The headline block is
+// the one place in this CLI where a full sentence has to be readable in a
+// terminal rather than scanned as a table, and a sentence that runs off the
+// right edge is a sentence that gets skipped.
+export function wrap(text: string, width: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean)
+  if (words.length === 0) return []
+
+  const lines: string[] = []
+  let line = ''
+  for (const word of words) {
+    if (line.length === 0) line = word
+    else if (line.length + 1 + word.length <= width) line += ` ${word}`
+    else { lines.push(line); line = word }
+  }
+  if (line.length > 0) lines.push(line)
+  return lines
+}

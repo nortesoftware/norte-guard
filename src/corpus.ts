@@ -13,7 +13,7 @@ import { objectPath } from './object-store.js'
 import { writeFileSync } from 'node:fs'
 import { rateWithCI, type RateWithCI } from './stats.js'
 import { EXPIRY_LOG as EXPIRY_LOG_NAME } from './capture-budget.js'
-import type { CaptureComposition, CaptureLabel, CaptureMetadata, NgpackManifest } from './ngpack.js'
+import type { CaptureComposition, CaptureLabel, CaptureMetadata, NgpackManifest, TarballRefusal } from './ngpack.js'
 
 export interface CorpusSample {
   package: string
@@ -51,6 +51,11 @@ export interface CorpusSample {
   // every package of this class.
   downloadWindowCovers?: boolean | null
   composition?: CaptureComposition
+  // The tarball was refused by policy rather than lost. Held apart from
+  // `tarballPresent` on purpose: both are captures with no bytes, and only one
+  // of them is a defect. A denominator can be corrected for a refusal, because
+  // the refusal states the size that caused it.
+  tarballRefused?: TarballRefusal
   // Known-biased selection, or unknown provenance. A corpus assembled by a
   // detector with a known bug is a draw from what that bug flagged, not from the
   // ecosystem, so it stays out of every denominator.
@@ -175,6 +180,7 @@ function readSample(dir: string): CorpusSample | null {
     downloadWindowEnd: meta.downloadWindowEnd,
     downloadWindowCovers: meta.downloadWindowCovers,
     composition: meta.composition ?? compositionFromNotes(meta.notes),
+    tarballRefused: meta.tarballRefused,
     ...classifyContamination(meta.captureReason, false),
   }
 }

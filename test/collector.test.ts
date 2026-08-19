@@ -16,11 +16,11 @@ import { tmpdir } from 'node:os'
 
 import { classifyGhostReversion, compareVersions } from '../src/genome.js'
 import { platformFamily, PlatformFamilyTracker } from '../src/platform-family.js'
-import { DailyCaptureBudget, rotateCaptures, directorySize, formatBytes, sweepQuarantine, QUARANTINE_REASON, consolidateDeltas, collectOrphanObjects } from '../src/capture-budget.js'
+import { DailyCaptureBudget, rotateCaptures, directorySize, formatBytes, sweepQuarantine, QUARANTINE_REASON, consolidateDeltas, collectOrphanObjects, extendQuarantineRetention, DEFAULT_MAX_CAPTURE_BYTES } from '../src/capture-budget.js'
 import { readObservations } from '../src/takedown-sweep.js'
 import { classifyFetchFailure, budgetFor } from '../src/watcher.js'
 import { describeComposition, compositionFromNotes } from '../src/corpus.js'
-import { classifyPublication } from '../src/observed-class.js'
+import { classifyPublication, TINY_PACKAGE_BYTES } from '../src/observed-class.js'
 import { absoluteRiskSignals, impliedHistory } from '../src/absolute-risk.js'
 import { putObject, getObject, objectPath } from '../src/object-store.js'
 import { rotateLogs } from '../src/log-rotation.js'
@@ -28,6 +28,8 @@ import { createApprovalRecord, createOverrideApproval } from '../src/approvals.j
 import {
   assessPromotion, scheduledReview, ruleEvidenceFor, verdictsFromCaptures,
   QUARANTINE_CAPTURE_REASON, REAL_USAGE_DOWNLOADS, VERDICT_AFTER_DAYS,
+  PROMOTION_MAX_FALSE_POSITIVE_RATE, PROMOTION_MAX_FALSE_POSITIVES_PER_DAY,
+  MEASURED_FLAGGED_PER_DAY, minimumTrackedFor,
   type TrackedVerdict, type TrackedStatus, type ClassCapture,
 } from '../src/watchlist.js'
 import { classPrecision, type CorpusSample } from '../src/corpus.js'
@@ -442,6 +444,175 @@ describe('rotateCaptures', () => {
   })
 })
 
+describe('the size cap on the score path', () => {
+  // The decision itself is three lines in the watcher and cannot be imported
+  // without starting a collector, so what is pinned here is the shape of the
+  // record it writes — which is what every denominator downstream reads.
+  it('separates a refusal from a loss, and carries the size that caused it', () => {
+    const refusal = {
+      reason: 'over-capture-cap' as const,
+      unpackedSize: 97 * 1024 ** 2,
+      capBytes: 8 * 1024 ** 2,
+    }
+
+    // The two states look identical on disk — a capture with a packument and no
+    // tarball — and they are opposite facts about the corpus.
+    expect(refusal.unpackedSize).toBeGreaterThan(refusal.capBytes)
+    // Recorded rather than inferred, so the decision can be re-made later
+    // against a different cap without asking the registry again.
+    expect(refusal.unpackedSize / 1024 ** 2).toBeCloseTo(97, 6)
+  })
+
+  it('never applies to quarantine, whose class is under 100KB by definition', () => {
+    // TINY_PACKAGE_BYTES is 100_000 and the score-path cap defaults to 8MB, so
+    // no member of the observed class can ever be refused by it. If that ever
+    // stops holding, the class stops being captured and this is where it fails.
+    expect(TINY_PACKAGE_BYTES).toBeLessThan(DEFAULT_MAX_CAPTURE_BYTES)
+  })
+})
+
+describe('extendQuarantineRetention', () => {
+  // The log lands beside captures/, so every fixture uses the real layout:
+  // <root>/captures/<capture>/ and <root>/retention-log.ndjson. Pointing the
+  // function at a bare temp directory writes the log into the system temp dir,
+  // where the next test finds it.
+  function corpus(prefix: string) {
+    const root = tempDir(prefix)
+    const capturesDir = join(root, 'captures')
+    mkdirSync(capturesDir, { recursive: true })
+    return { root, capturesDir }
+  }
+
+  function quarantineCapture(capturesDir: string, name: string, opts: {
+    capturedAt: string
+    retainUntil?: string
+    label?: string
+    reason?: string
+  }) {
+    const dir = join(capturesDir, name)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'capture-metadata.json'), JSON.stringify({
+      package: name, version: '1.0.0', capturedAt: opts.capturedAt, score: 17,
+      label: opts.label ?? 'unconfirmed',
+      captureReason: opts.reason ?? 'quarantine-no-genome',
+      retainUntil: opts.retainUntil,
+      doNotExtract: true,
+    }))
+    return dir
+  }
+
+  const read = (dir: string) =>
+    JSON.parse(readFileSync(join(dir, 'capture-metadata.json'), 'utf-8')) as Record<string, unknown>
+
+  it('writes nothing unless it is told to apply', () => {
+    const { root, capturesDir } = corpus('ng-ext-dry-')
+    const dir = quarantineCapture(capturesDir, 'una', {
+      capturedAt: '2026-08-12T00:00:00.000Z', retainUntil: '2026-08-19T00:00:00.000Z',
+    })
+
+    const result = extendQuarantineRetention({
+      capturesDir, days: 45, reason: 'the verdict takes 30',
+    })
+
+    expect(result.dryRun).toBe(true)
+    expect(result.changed).toHaveLength(1)
+    expect(read(dir)['retainUntil']).toBe('2026-08-19T00:00:00.000Z')
+    expect(read(dir)['retainUntilSource']).toBeUndefined()
+    expect(existsSync(join(root, 'retention-log.ndjson'))).toBe(false)
+  })
+
+  it('measures the new date from the capture, not from now', () => {
+    const { capturesDir } = corpus('ng-ext-from-')
+    const dir = quarantineCapture(capturesDir, 'una', {
+      capturedAt: '2026-08-12T00:00:00.000Z', retainUntil: '2026-08-19T00:00:00.000Z',
+    })
+
+    extendQuarantineRetention({
+      capturesDir, days: 45, reason: 'r', dryRun: false,
+      now: Date.parse('2026-08-17T00:00:00.000Z'),
+    })
+
+    // 12 Aug + 45 days, not 17 Aug + 45 days. Measuring from now would give the
+    // oldest captures — the ones closest to an answer — the longest extension.
+    expect(read(dir)['retainUntil']).toBe('2026-09-26T00:00:00.000Z')
+    expect(String(read(dir)['retainUntilSource'])).toContain('45 days')
+  })
+
+  it('never shortens a retention it was pointed at', () => {
+    const { capturesDir } = corpus('ng-ext-short-')
+    const dir = quarantineCapture(capturesDir, 'larga', {
+      capturedAt: '2026-08-12T00:00:00.000Z', retainUntil: '2027-01-01T00:00:00.000Z',
+    })
+
+    const result = extendQuarantineRetention({ capturesDir, days: 45, reason: 'r', dryRun: false })
+
+    expect(result.alreadyLonger).toBe(1)
+    expect(result.changed).toHaveLength(0)
+    expect(read(dir)['retainUntil']).toBe('2027-01-01T00:00:00.000Z')
+  })
+
+  it('leaves labelled captures and other capture reasons alone', () => {
+    const { capturesDir } = corpus('ng-ext-skip-')
+    quarantineCapture(capturesDir, 'confirmada', {
+      capturedAt: '2026-08-12T00:00:00.000Z', label: 'confirmed_malicious',
+    })
+    quarantineCapture(capturesDir, 'por-score', {
+      capturedAt: '2026-08-12T00:00:00.000Z', reason: 'watcher-threshold',
+    })
+
+    const result = extendQuarantineRetention({ capturesDir, days: 45, reason: 'r', dryRun: false })
+
+    expect(result.labelled).toBe(1)
+    expect(result.scanned).toBe(1)      // the watcher-threshold one is not even scanned
+    expect(result.changed).toHaveLength(0)
+  })
+
+  it('records one line per capture it changed, with the reason', () => {
+    const { root, capturesDir } = corpus('ng-ext-log-')
+    quarantineCapture(capturesDir, 'una', { capturedAt: '2026-08-12T00:00:00.000Z' })
+    quarantineCapture(capturesDir, 'otra', { capturedAt: '2026-08-13T00:00:00.000Z' })
+
+    const result = extendQuarantineRetention({
+      capturesDir, days: 45, reason: 'the verdict takes 30 and retention was 7', dryRun: false,
+    })
+
+    expect(result.changed).toHaveLength(2)
+    const log = readFileSync(join(root, 'retention-log.ndjson'), 'utf-8').trim().split('\n')
+    expect(log).toHaveLength(2)
+    // By name, not by position: readdir order is the filesystem's business.
+    const rows = log.map(l => JSON.parse(l) as Record<string, unknown>)
+    const una = rows.find(r => r['package'] === 'una')!
+    expect(una['reason']).toContain('the verdict takes 30')
+    expect(una['retentionDays']).toBe(45)
+    expect(una['from']).toBeNull()
+    expect(String(una['to']).slice(0, 10)).toBe('2026-09-26')
+    expect(String(rows.find(r => r['package'] === 'otra')!['to']).slice(0, 10)).toBe('2026-09-27')
+  })
+
+  it('refuses without a reason, and refuses a number of days that is not one', () => {
+    const { capturesDir } = corpus('ng-ext-refuse-')
+    quarantineCapture(capturesDir, 'una', { capturedAt: '2026-08-12T00:00:00.000Z' })
+
+    expect(extendQuarantineRetention({ capturesDir, days: 45, reason: '  ' }).refused).toBeTruthy()
+    expect(extendQuarantineRetention({ capturesDir, days: NaN, reason: 'r' }).refused).toBeTruthy()
+    expect(extendQuarantineRetention({ capturesDir, days: 0, reason: 'r' }).refused).toBeTruthy()
+    expect(extendQuarantineRetention({ capturesDir, days: -5, reason: 'r' }).refused).toBeTruthy()
+  })
+
+  it('survives a capture being written while it runs', () => {
+    const { capturesDir } = corpus('ng-ext-partial-')
+    quarantineCapture(capturesDir, 'buena', { capturedAt: '2026-08-12T00:00:00.000Z' })
+    const half = join(capturesDir, 'a-medias')
+    mkdirSync(half, { recursive: true })
+    writeFileSync(join(half, 'capture-metadata.json'), '{"package":"a-med')
+
+    const result = extendQuarantineRetention({ capturesDir, days: 45, reason: 'r', dryRun: false })
+
+    expect(result.unreadable).toBe(1)
+    expect(result.changed).toHaveLength(1)
+  })
+})
+
 describe('collectOrphanObjects', () => {
   it('frees what expired quarantine left behind, and nothing a capture still names', () => {
     const root = tempDir('ng-gc-')
@@ -733,12 +904,48 @@ describe('clase observada', () => {
     expect(markers.inClass).toBe(false)
   })
 
-  it('with a repository or with a genome, out', () => {
+  it('with a repository, out', () => {
     const [pRepo, mRepo] = pkg({ ageDays: 1, bytes: 1000, repo: true })
     expect(classifyPublication(pRepo, mRepo, 'no-genome').inClass).toBe(false)
+  })
 
+  // The regime was the fourth conjunct until v1.4.0 and did no work: a name
+  // under YOUNG_NAME_DAYS = 7 cannot have a first analysed version at least
+  // MIN_AGE_DAYS_FOR_GENOME = 90 days old, so `young` entails `noGenome` with 83
+  // days of margin. The old test asserted `inClass === false` for a one-day-old
+  // package under the genome regime, which is a combination the scorer cannot
+  // produce; it pinned the conjunct by constructing an input that does not
+  // occur. Measured over the whole marker record: 26,297 rows with young=true,
+  // 0 under the genome regime, and the conjunct removed 0 of 114,545 rows.
+  it('the regime is recorded and no longer decides — young already entails it', () => {
     const [p, m] = pkg({ ageDays: 1, bytes: 1000 })
-    expect(classifyPublication(p, m, 'genome').inClass).toBe(false)
+
+    const markers = classifyPublication(p, m, 'genome')
+    expect(markers.noGenome).toBe(false)
+    expect(markers.young).toBe(true)
+    // Three conjuncts, and the regime is not one of them.
+    expect(markers.inClass).toBe(true)
+    expect(markers.inClass).toBe(markers.young && markers.tiny && !markers.hasRepository)
+  })
+
+  it('the class is byte-identical with the regime conjunct and without it', () => {
+    // Every combination the classifier can produce, checked both ways. Where the
+    // entailment holds the two definitions agree; where an impossible input is
+    // constructed by hand they differ, and that difference is the whole content
+    // of the conjunct that was removed.
+    for (const ageDays of [0, 1, 6, 6.99, 7, 30, 400]) {
+      for (const bytes of [1, 1000, 99_999, 100_000, 5_000_000]) {
+        for (const repo of [false, true]) {
+          const [p, m] = pkg({ ageDays, bytes, repo })
+          // 'genome' is unreachable for ageDays < 90; the reachable regime for a
+          // young name is the only one that can occur.
+          const regime = ageDays >= 90 ? 'genome' : 'no-genome'
+          const markers = classifyPublication(p, m, regime)
+          const withOldConjunct = markers.noGenome && markers.young && markers.tiny && !markers.hasRepository
+          expect(markers.inClass).toBe(withOldConjunct)
+        }
+      }
+    }
   })
 
   it('an old name is not the class however small it is', () => {
@@ -1139,15 +1346,53 @@ describe('promotion criterion and dated review', () => {
       lastDownloads: 0, ruleEvidence: 'rule-matched', detail: '', ...over,
     })
 
+  // Asserted on the blocker rather than on `promotable`, because promotion now
+  // has two independent conditions and a test that reads the boolean cannot say
+  // which one it is reading.
+  const takedownBlocker = (verdicts: TrackedVerdict[]) =>
+    assessPromotion(verdicts).blockers.some(b => b.includes('can be traced to the rule firing'))
+
   it('does not promote without the three removals', () => {
-    expect(assessPromotion([v('confirmed-takedown'), v('confirmed-takedown')]).promotable).toBe(false)
-    expect(assessPromotion([v('confirmed-takedown'), v('confirmed-takedown'), v('confirmed-takedown')]).promotable).toBe(true)
+    expect(takedownBlocker([v('confirmed-takedown'), v('confirmed-takedown')])).toBe(true)
+    expect(takedownBlocker([
+      v('confirmed-takedown'), v('confirmed-takedown'), v('confirmed-takedown'),
+    ])).toBe(false)
   })
 
-  it('a second confirmed false positive takes it away', () => {
+  // Under the old absolute ceiling one false positive passed and a second took
+  // promotion away. Both now fail, and for a better reason: four tracked
+  // packages cannot establish a rate either way.
+  it('a false positive is weighed as a rate against the flow, not counted', () => {
     const tres = [v('confirmed-takedown'), v('confirmed-takedown'), v('confirmed-takedown')]
-    expect(assessPromotion([...tres, v('confirmed-false-positive')]).promotable).toBe(true)
-    expect(assessPromotion([...tres, v('confirmed-false-positive'), v('confirmed-false-positive')]).promotable).toBe(false)
+    const one = assessPromotion([...tres, v('confirmed-false-positive')])
+    const two = assessPromotion([...tres, v('confirmed-false-positive'), v('confirmed-false-positive')])
+
+    expect(one.confirmedFalsePositives).toBe(1)
+    expect(two.confirmedFalsePositives).toBe(2)
+    expect(one.promotable).toBe(false)
+    expect(two.promotable).toBe(false)
+    for (const a of [one, two]) {
+      expect(a.blockers.join(' ')).toContain('against a ceiling of 0.164%')
+    }
+  })
+
+  // The point of replacing the count. An unreachable criterion is not a strict
+  // one, so the replacement has to be shown to be reachable — by evidence, at a
+  // sample size the collector can actually accumulate.
+  it('is reachable: a clean record at the sample size the rate demands does promote', () => {
+    const takedowns = [
+      v('confirmed-takedown', { publisher: 'javonayers999' }),
+      v('confirmed-takedown', { publisher: 'ferrousdev' }),
+      v('confirmed-takedown', { publisher: 'a_soclav' }),
+    ]
+    const clean = Array.from({ length: minimumTrackedFor(0) }, () =>
+      v('pending', { daysTracked: 3, lastDownloads: 0 }))
+
+    const a = assessPromotion([...takedowns, ...clean])
+    expect(a.verifiedTakedowns).toBe(3)
+    expect(a.confirmedFalsePositives + a.emergingFalsePositives).toBe(0)
+    expect(a.blockers).toEqual([])
+    expect(a.promotable).toBe(true)
   })
 
   // The bug this criterion shipped with: `track` reported PROMOTABLE on eight
@@ -1186,13 +1431,63 @@ describe('promotion criterion and dated review', () => {
     const emerging = (dl: number) =>
       v('pending', { daysTracked: 3, lastDownloads: dl })
 
-    expect(assessPromotion([...tres, emerging(0)]).promotable).toBe(true)
-    expect(assessPromotion([...tres, emerging(9)]).promotable).toBe(true)
+    expect(assessPromotion([...tres, emerging(0)]).emergingFalsePositives).toBe(0)
+    expect(assessPromotion([...tres, emerging(9)]).emergingFalsePositives).toBe(0)
 
     const two = assessPromotion([...tres, emerging(50), emerging(300)])
     expect(two.emergingFalsePositives).toBe(2)
     expect(two.promotable).toBe(false)
     expect(two.blockers.join(' ')).toContain('before their 30 days are up')
+  })
+
+  // The false positive criterion is a RATE against the measured flow, not a
+  // count. `PROMOTION_MAX_FALSE_POSITIVES = 1` was an absolute ceiling of one
+  // false positive for all time; against 608 flags a day that is not a strict
+  // bar but an unreachable one, and an unreachable bar gets crossed by someone
+  // lowering it rather than by the rule improving.
+  it('a clean run over four packages does not clear the rate — the sample has to earn it', () => {
+    const tres = [v('confirmed-takedown'), v('confirmed-takedown'), v('confirmed-takedown')]
+    const a = assessPromotion([...tres, v('pending', { daysTracked: 3, lastDownloads: 0 })])
+
+    expect(a.emergingFalsePositives).toBe(0)
+    expect(a.promotable).toBe(false)
+    // Tested on the upper bound, so zero observed over a tiny sample cannot pass.
+    expect(a.blockers.join(' ')).toContain('upper 95% bound')
+  })
+
+  it('the rate is one broken package a day at the measured flow, and says how far off it is', () => {
+    expect(PROMOTION_MAX_FALSE_POSITIVE_RATE)
+      .toBeCloseTo(PROMOTION_MAX_FALSE_POSITIVES_PER_DAY / MEASURED_FLAGGED_PER_DAY, 10)
+    // With nothing observed, the bar is a sample size and nothing else.
+    expect(minimumTrackedFor(0)).toBeGreaterThan(1500)
+    expect(minimumTrackedFor(0)).toBeLessThan(2500)
+    // More observed failures means a larger sample, never a smaller one.
+    expect(minimumTrackedFor(1)).toBeGreaterThan(minimumTrackedFor(0))
+  })
+
+  it('one operator republishing is not three independent removals', () => {
+    const spree = [
+      v('confirmed-takedown', { publisher: 'javonayers999' }),
+      v('confirmed-takedown', { publisher: 'javonayers999' }),
+      v('confirmed-takedown', { publisher: 'javonayers999' }),
+    ]
+    expect(assessPromotion(spree).blockers.join(' ')).toContain('1 npm account')
+
+    const three = [
+      v('confirmed-takedown', { publisher: 'javonayers999' }),
+      v('confirmed-takedown', { publisher: 'ferrousdev' }),
+      v('confirmed-takedown', { publisher: 'a_soclav' }),
+    ]
+    expect(three.length).toBe(3)
+    expect(assessPromotion(three).blockers.join(' ')).not.toContain('npm account')
+  })
+
+  // An unmeasured field is not a failed check. Nothing populated the publisher
+  // before v1.4.0, and a criterion that blocks on a field nobody filled in would
+  // be reporting the absence of a lookup as evidence about the rule.
+  it('an unmeasured publisher is skipped, not graded as one account', () => {
+    const noPublisher = [v('confirmed-takedown'), v('confirmed-takedown'), v('confirmed-takedown')]
+    expect(assessPromotion(noPublisher).blockers.join(' ')).not.toContain('npm account')
   })
 
   it('both blockers are reported, not only the first', () => {
@@ -1257,7 +1552,7 @@ describe('the capture filter and the rule are different criteria', () => {
     const [v] = verdictsFromCaptures([capture()])
     expect(v!.status).toBe('confirmed-takedown')
     expect(v!.ruleEvidence).toBe('unverifiable')
-    expect(v!.detail).toContain('capture filter (4 conditions)')
+    expect(v!.detail).toContain('capture filter (3 conditions)')
     expect(v!.detail).toContain('unknowable')
   })
 

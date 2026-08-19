@@ -19,6 +19,8 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { NPM_SECURITY_HOLDER } from './takedown.js'
+import { wilsonInterval } from './stats.js'
 
 export const WATCHLIST_FILE = 'watchlist.json'
 export const TRACKING_LOG = 'tracking-log.ndjson'
@@ -121,7 +123,21 @@ export interface TrackedVerdict {
   // What this record can say about the rule that blocks builds, as opposed to
   // the filter that selected the package.
   ruleEvidence: RuleEvidence
+  // The npm account that published it, when the caller could establish one.
+  // Removals are counted per account as well as per package: one operator
+  // publishing eleven near-identical stubs is not eleven confirmations.
+  publisher?: string | null
   detail: string
+}
+
+// The smallest tracked sample at which `observed` false positives still clears
+// PROMOTION_MAX_FALSE_POSITIVE_RATE on the upper 95% bound. Reported alongside
+// every refusal so "not yet" says how far.
+export function minimumTrackedFor(observed: number, ceiling = PROMOTION_MAX_FALSE_POSITIVE_RATE): number {
+  for (let n = Math.max(observed, 1); n <= 1_000_000; n++) {
+    if (wilsonInterval(observed, n).high <= ceiling) return n
+  }
+  return Infinity
 }
 
 export function loadWatchlist(dir: string): WatchedPackage[] {
@@ -283,7 +299,7 @@ export function scheduledReview(
 //
 // The watchlist follows names the rule flagged and waits thirty days for the
 // registry to settle them. Quarantine takes a different route to the same fact:
-// it keeps every publication matching the four free conditions — which is what
+// it keeps every publication matching the three free conditions — which is what
 // captureReason 'quarantine-no-genome' records — and when npm later publishes
 // 0.0.1-security over one, the sweep labels the capture confirmed_malicious with
 // npm's own removal as the source.
@@ -311,13 +327,32 @@ export interface ClassCapture {
   // capture. Absent on every capture that predates the field, and graded
   // conservatively when absent.
   downloadWindowCovers?: boolean | null
+  // The publishing account, when the caller looked it up. Optional because
+  // establishing it means reading the capture's packument, which is worth doing
+  // for the handful of removals and not for every capture on disk.
+  publisher?: string | null
   contaminated: boolean
 }
 
 export const QUARANTINE_CAPTURE_REASON = 'quarantine-no-genome'
 
+// The removal record, as one set of names, read from `takedown-log*` and every
+// rotation of it. Passing it in is what turns this from a reader of LABELS into
+// a reader of EVENTS.
+//
+// The difference was eleven true positives. A capture only carried
+// `label: confirmed_malicious` if something had gone back and relabelled it, and
+// relabelling happened for the six packages A5 needed and for nothing else. The
+// takedown log meanwhile holds 233 distinct removed names across five files, 53
+// of which this collector had captured, 36 of them through quarantine. Twenty
+// five of those 36 are captures of npm's own `0.0.1-security` tombstone and
+// prove nothing — the collector saw the placeholder, not the artifact — and the
+// remaining ELEVEN are genuine pre-removal observations the promotion gate had
+// never counted, because it was reading `takedowns.json`, a single sweep frozen
+// on 2026-08-12.
 export function verdictsFromCaptures(
   captures: ClassCapture[],
+  removedNames: ReadonlySet<string> = new Set(),
   now = Date.now()
 ): TrackedVerdict[] {
   // One verdict per PACKAGE, not per capture directory. The same package is
@@ -329,10 +364,17 @@ export function verdictsFromCaptures(
     .filter(c =>
       !c.contaminated &&
       c.captureReason === QUARANTINE_CAPTURE_REASON &&
-      c.label === 'confirmed_malicious' &&
-      // npm's removal, not ours. A capture labelled from anything else is
-      // evidence of something, but not of this.
-      Boolean(c.labelSource?.includes('npm-takedown'))
+      // A capture of the tombstone is not an observation of the package. npm
+      // publishes 0.0.1-security when it removes something, that publication is
+      // itself a change on the feed, and a collector that captures it has
+      // captured the removal notice. Counting those as detections is the failure
+      // this project named in takedown-sweep.ts and it reappears here.
+      c.version !== NPM_SECURITY_HOLDER &&
+      // Removed by npm, established either way round: the capture was relabelled
+      // from npm's takedown, or the name is in the removal record. The second
+      // arm is the one that was missing.
+      ((c.label === 'confirmed_malicious' && Boolean(c.labelSource?.includes('npm-takedown'))) ||
+        removedNames.has(c.package))
     )
     .filter(c => {
       if (seen.has(c.package)) return false
@@ -348,12 +390,13 @@ export function verdictsFromCaptures(
         status: 'confirmed-takedown' as const,
         lastDownloads: null,
         ruleEvidence,
+        publisher: c.publisher ?? null,
         // The detail used to say "with the four free conditions holding" and
         // stop there, which read as though the rule had fired. Four of them did
         // hold; the rule needs five, and which of the three things that means is
         // the only part a reader needs.
         detail:
-          `quarantined by the capture filter (4 conditions), ${c.version} removed by npm` +
+          `quarantined by the capture filter (3 conditions), ${c.version} removed by npm` +
           (ruleEvidence === 'rule-matched'
             ? '; 0 downloads over a week the package was alive for, so the 5-condition rule would have blocked it'
             : ruleEvidence === 'vacuous-zero'
@@ -403,10 +446,49 @@ export interface PromotionAssessment {
   blockers: string[]
 }
 
-// The criterion, in code. Three confirmed removals earn the default; a second
-// confirmed false positive takes it away again.
+// The criterion, in code. Three confirmed removals earn the default; the false
+// positive side is a RATE, for the reason measured below.
 export const PROMOTION_MIN_TAKEDOWNS = 3
-export const PROMOTION_MAX_FALSE_POSITIVES = 1
+
+// What the gate actually costs, per day, if it goes on by default.
+//
+// The old constant was `PROMOTION_MAX_FALSE_POSITIVES = 1`: an absolute count of
+// false positives, ever, across the whole life of the rule. Against a stream it
+// is not a strict criterion, it is an unreachable one — and it fails in the
+// direction that looks rigorous, which is why it survived. Measured over the six
+// full days in changes-log*, the collector saw a mean of 19,091 publications a
+// day and the observed class fires on 3.187% of them: 608 packages flagged per
+// day, ranging 50 to 1,136 as collector uptime varied. A ceiling of one false
+// positive for all time, against 608 flags a day, is met only by a rule that is
+// never wrong — and the way an unreachable bar actually gets crossed is by
+// someone lowering it once, not by the rule improving.
+//
+// So the budget is stated the way an operator would state it: how many real
+// packages may this break in a day. One. Everything else is arithmetic against
+// the measured flow.
+export const MEASURED_PUBLICATIONS_PER_DAY = 19_091
+export const MEASURED_FLAGGED_PER_DAY = 608
+export const PROMOTION_MAX_FALSE_POSITIVES_PER_DAY = 1
+
+// One broken install a day, over 608 flags a day: 0.164%.
+export const PROMOTION_MAX_FALSE_POSITIVE_RATE =
+  PROMOTION_MAX_FALSE_POSITIVES_PER_DAY / MEASURED_FLAGGED_PER_DAY
+
+// A rate is only a criterion if it can be shown to be met, and an observed rate
+// of 0 over a handful of packages shows nothing. The test is therefore against
+// the UPPER 95% bound of the observed rate, which has the property the count
+// version lacked: it cannot be satisfied by a small sample. With zero false
+// positives observed the bound clears 0.164% at n = 1,829 tracked packages
+// (Wilson; the rule of three gives the same order), and no sooner. That number
+// is not a hurdle added on top — it is what claiming this rate honestly costs,
+// and it is reported so "not yet" carries its own distance.
+//
+// Three independent npm accounts among the removals, too. The eleven true
+// positives the removal record turned up come from four accounts, and six of
+// them are one account publishing near-identical lock/mutex stubs in a week. A
+// criterion counting packages would read that spree as eleven confirmations of a
+// rule; it is closer to four.
+export const PROMOTION_MIN_TAKEDOWN_PUBLISHERS = 3
 
 export function assessPromotion(verdicts: TrackedVerdict[]): PromotionAssessment {
   const takedowns = verdicts.filter(v => v.status === 'confirmed-takedown')
@@ -417,6 +499,12 @@ export function assessPromotion(verdicts: TrackedVerdict[]): PromotionAssessment
 
   const confirmedFalsePositives = verdicts.filter(v => v.status === 'confirmed-false-positive').length
   const pending = verdicts.filter(v => v.status === 'pending').length
+  // Distinct accounts behind the removals the criterion runs on. Zero means
+  // nobody looked, which is not the same as one account and is not graded as a
+  // failure — the check below skips rather than blocks on an unmeasured field.
+  const takedownPublishers = new Set(
+    takedowns.filter(v => v.ruleEvidence === 'rule-matched' && v.publisher).map(v => v.publisher!)
+  ).size
 
   // Counted over the whole tracked class, not only over records the rule can be
   // verified against. The class is a superset of the rule, so a package the
@@ -446,11 +534,39 @@ export function assessPromotion(verdicts: TrackedVerdict[]): PromotionAssessment
       `not a measurement, and it does not count toward promoting anything`
     )
   }
-  if (confirmedFalsePositives + emergingFalsePositives > PROMOTION_MAX_FALSE_POSITIVES) {
+  // The false positive side, as a rate against the measured flow. Tested on the
+  // upper bound rather than the point estimate, so an observed zero over a small
+  // sample cannot pass: it is the sample size that has to earn the claim.
+  const falsePositives = confirmedFalsePositives + emergingFalsePositives
+  const tracked = verdicts.length
+  const observedRate = tracked > 0 ? falsePositives / tracked : null
+  const rateBound = tracked > 0 ? wilsonInterval(falsePositives, tracked).high : null
+
+  if (rateBound === null) {
     blockers.push(
-      `${confirmedFalsePositives} confirmed false positives and ${emergingFalsePositives} already ` +
-      `alive with >=${REAL_USAGE_DOWNLOADS} weekly downloads before their ${VERDICT_AFTER_DAYS} days ` +
-      `are up, against a ceiling of ${PROMOTION_MAX_FALSE_POSITIVES}`
+      `nothing is tracked, so the false positive rate has no denominator. A rate over an empty ` +
+      `denominator is not a rate, and it is not a pass either`
+    )
+  } else if (rateBound > PROMOTION_MAX_FALSE_POSITIVE_RATE) {
+    blockers.push(
+      `${falsePositives} of ${tracked} tracked are false positives ` +
+      `(${confirmedFalsePositives} confirmed, ${emergingFalsePositives} already alive with ` +
+      `>=${REAL_USAGE_DOWNLOADS} weekly downloads before their ${VERDICT_AFTER_DAYS} days are up) — ` +
+      `${(100 * (observedRate ?? 0)).toFixed(1)}%, upper 95% bound ${(100 * rateBound).toFixed(1)}%, ` +
+      `against a ceiling of ${(100 * PROMOTION_MAX_FALSE_POSITIVE_RATE).toFixed(3)}% ` +
+      `(${PROMOTION_MAX_FALSE_POSITIVES_PER_DAY} broken package per day at the measured ` +
+      `${MEASURED_FLAGGED_PER_DAY} flags/day). At ${falsePositives} observed this needs ` +
+      `${minimumTrackedFor(falsePositives)} tracked packages to clear, and there are ${tracked}`
+    )
+  }
+
+  // Independent events, not republications by one operator.
+  if (takedownPublishers > 0 && takedownPublishers < PROMOTION_MIN_TAKEDOWN_PUBLISHERS) {
+    blockers.push(
+      `${verifiedTakedowns} removals come from ${takedownPublishers} npm ` +
+      `${takedownPublishers === 1 ? 'account' : 'accounts'}, against a floor of ` +
+      `${PROMOTION_MIN_TAKEDOWN_PUBLISHERS}. One operator publishing the same shape ten times is one ` +
+      `event, and a criterion that counts packages reads it as ten`
     )
   }
 

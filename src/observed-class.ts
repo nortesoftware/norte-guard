@@ -16,13 +16,23 @@ export const YOUNG_NAME_DAYS = 7
 export const TINY_PACKAGE_BYTES = 100_000
 
 export interface ClassMarkers {
+  // Recorded, and no longer a conjunct. `young` ENTAILS it: hasGenomeRegime
+  // needs a first analysed version at least MIN_AGE_DAYS_FOR_GENOME = 90 days
+  // old, and `young` is a name under YOUNG_NAME_DAYS = 7 days, so there are 83
+  // days of margin between them and no package can satisfy one without the
+  // other. Measured over the whole marker record rather than argued: 26,297
+  // rows with young=true, 0 of them under the genome regime, and adding the
+  // conjunct removed 0 of 114,545 rows while young, tiny and !hasRepository
+  // removed 2,732, 3,949 and 7,813. A conjunct that excludes nothing is not a
+  // condition, it is a restatement, and leaving it in the definition made the
+  // class look like it rested on four independent facts when it rests on three.
   noGenome: boolean
   nameAgeDays: number | null
   unpackedSize: number
   hasRepository: boolean
   young: boolean
   tiny: boolean
-  // All three markers plus the regime. Large new packages are not this class:
+  // The three markers that do work. Large new packages are not this class:
   // whatever they are, they are not what was observed.
   inClass: boolean
 }
@@ -57,7 +67,7 @@ export function classifyPublication(
     hasRepository,
     young,
     tiny,
-    inClass: noGenome && young && tiny && !hasRepository,
+    inClass: young && tiny && !hasRepository,
   }
 }
 

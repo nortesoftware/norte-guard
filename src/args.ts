@@ -54,6 +54,23 @@ export function parseGigabytes(raw: string | undefined, flag: string): number | 
   return Math.round(value * 1024 ** 3)
 }
 
+// Megabytes, for the one bound that is measured in them: the unpacked size a
+// package declares, which is the only size knowable before paying for the
+// download. Same refusal as above and for the same reason.
+export function parseMegabytes(raw: string | undefined, flag: string): number | undefined {
+  if (raw === undefined) return undefined
+
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new FlagError(
+      `--${flag}=${raw} is not a size in MB. It has to be a positive number — ` +
+      `--${flag}=8 for 8MB.`
+    )
+  }
+
+  return Math.round(value * 1024 ** 2)
+}
+
 // The value of --flag=value, or undefined. One definition, because reading the
 // same flag two different ways in two branches is how --threshold and
 // --capture-budget drifted apart.

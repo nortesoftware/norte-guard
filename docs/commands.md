@@ -135,6 +135,95 @@ delete, by name, before it happens.
 
 `--total-cap=<GB>` sets it. `--max-gb=<GB>` is the old name and still works.
 
+### The score path does not download everything it selects
+
+`--max-capture-mb=<n>` (default 8) bounds the largest package the score path
+fetches the bytes of, by the **unpacked size the packument declares** — the only
+size knowable before paying for the download. Quarantine has its own cap and is
+never refused by this one: the class it selects is under 100 KB by definition.
+
+The measurement behind the number: 10% of `watcher-threshold` captures hold 81%
+of that segment's bytes, and they are the captures the analyser can read least —
+byte coverage 9.79%, 16% shipping a native binary, 34.8% shipping unreadable
+minified code. Those are gigabytes of bytes nobody can look at.
+
+**The packument is captured anyway, and that is the condition on the cap rather
+than a detail.** An analyser that stops capturing large binaries stops being able
+to measure its own blind spot. So a refused capture keeps its packument, its
+manifest and its metadata, and records:
+
+```json
+"tarballRefused": { "reason": "over-capture-cap", "unpackedSize": 4811350, "capBytes": 8388608 }
+```
+
+which is what separates a refusal from a loss. Both are a capture with no
+tarball; one is a knowable exclusion carrying the size that caused it, and the
+other is a defect.
+
+`analyzability` then reports the headline rate twice — over the captures it could
+look at, and bounded over the complete population:
+
+```
+SHIPS A BINARY, WASM, BYTECODE OR UNREADABLE MINIFIED CODE
+  5.62% (95% Wilson CI: ..., n=445)
+
+  104 captures were refused for size ... Over the complete population of 549:
+    at least 4.55% (none of the refused ships one)
+    at most  23.50% (all of them do)
+```
+
+**The width of that bound is exactly the fraction refused**, so the cap is a
+direct trade between disk and how much the corpus can still say. Measured on this
+corpus:
+
+| cap | refused | measured over what was kept | bound over everything | bytes saved |
+|---|---|---|---|---|
+| 8 MB | 18.9% | 5.62% | 4.55%–23.50% | ~96% |
+| 16 MB | 13.1% | 8.81% | 7.65%–20.77% | ~87% |
+| 32 MB | 8.2% | 12.50% | 11.48%–19.67% | ~67% |
+| none | 0% | 19.31% | 19.31% | — |
+
+The refused captures are not unknown — they are known to be large, and large is
+strongly associated with the thing being measured: among captures over 8 MB taken
+before the cap existed, **78%** ship an opaque executable, against 5.6% of those
+under it. That is a calibration, not a measurement, and it decays as the corpus
+ages away from the pre-cap sample; `tarballRefused.unpackedSize` is kept so the
+refused population can always be re-described by size.
+
+### Retention is written into the capture, not read from the policy
+
+Each quarantine capture carries its own `retainUntil`, computed when it was
+taken, and the sweep reads that date rather than today's policy. A capture
+carries its own terms — which is right, and has one consequence that cost this
+project its corpus clock: **raising `--quarantine-days` does nothing for the
+captures already on disk.**
+
+Retention was 7 days. A verdict takes 30 (`VERDICT_AFTER_DAYS`). So no
+unconfirmed capture of the observed class ever reached the age at which its
+answer arrives, and the n=2 evidence bottleneck was the retention policy rather
+than the capture filter. The class costs **12 KB per capture** and 40 MB in
+total; the constraint was never disk.
+
+```bash
+norte-guard budget --extend-quarantine=45 --reason="why"          # dry-run
+norte-guard budget --extend-quarantine=45 --reason="why" --apply  # writes
+```
+
+Dry-run by default, unlike its neighbours in `budget`, and deliberately:
+`--reset` moves a counter, this changes the terms recorded on evidence. It
+
+  - **measures from the capture, never from now.** A capture taken five days ago
+    with 45 days of retention has 40 left. Measuring from now would hand the
+    oldest captures — the ones closest to an answer — the longest extension.
+  - **never shortens.** A capture already retained longer is counted and left
+    alone, so a second run is a no-op and a wrong number cannot delete anything.
+  - **records what it did**, one line per capture in `retention-log.ndjson`
+    (package, version, from, to, reason, when), and `retainUntilSource` in the
+    capture's own metadata — so a snapshot read on its own says why its clock
+    does not match the policy that took it.
+  - **survives the collector running.** A capture being written while it scans
+    reads as half a file; those are counted as unreadable and skipped.
+
 The number the cap compares against is **the bytes under `captures/`** — the
 capture directories and the shared object store beneath them. It is not the
 total in the object store's index: `index.ndjson` is append-only and records
@@ -363,3 +452,104 @@ Module differences are in the same table with intervals widened by Bonferroni
 for the number of modules compared. Picking the largest row of a forty-row table
 and reading a 95% interval off it is how the `child_process` claim was made in
 the first place.
+
+## `capabilities` — what the code can reach, and how often that separates anything
+
+```bash
+norte-guard capabilities --capture=leb128x          # one package
+norte-guard capabilities --control                  # the comparison
+```
+
+Four capabilities, computed over the reachability graph `reachability` already
+builds. No new patterns: three of the four are the module being reached, and
+reaching it is followed from the gate through renames, destructuring, property
+writes and folded concatenations rather than searched for as text.
+
+| capability | reached when |
+|---|---|
+| `credential_read` | a string naming a secret reached a filesystem or path call, **or** `process.env` was read for a token-shaped variable |
+| `network_egress` | `net`, `http`, `https` or `dgram` is reached, or the global `fetch` is called |
+| `external_exec` | `child_process` is reached |
+| `dynamic_code` | `vm` is reached, or `eval`/`Function` is called, or a specifier is decided at runtime |
+
+**Three answers, never two.** `reached`, `not-reached`, `indeterminate`. The
+third is not a hedge, it is the whole point: 37 of the 42 confirmed captures
+ship an executable no parser reads — a V8 bytecode cache, a native binary — and
+a two-valued analysis records those as reaching nothing at all. The malicious
+side would come out cleaner than the control **because it is better hidden.**
+
+Every kind of lost trail is mapped to what it can hide. A specifier decided at
+runtime can be any module, so it blinds the three module capabilities — and it
+*is* `dynamic_code`, so the same fact that blinds three answers the fourth. A
+computed member leaves the module known and the member unknown, so it blinds
+only the capability that needs a member. `reached` always beats blinded: a
+capability that was found does not need the trail that was lost.
+
+`process.env`, `fetch`, `eval` and `Function` have no gate to arrive through —
+nothing imports them — so they are recorded apart from the module list rather
+than as a fourth door. A pseudo-module named `fetch` in `reachable` would appear
+in every module-prevalence table this project has already published.
+
+### `--control` — the comparison, and its unit
+
+```bash
+norte-guard capabilities --control --ratio=10
+```
+
+Cases are every `confirmed_malicious` capture that still holds its bytes.
+Controls are drawn from the captures the collector already took: **same size**
+(nearest neighbour on log unpacked size, within a factor of two), **same days**
+(the window is the cases' own span), **not withdrawn** (every name in the
+takedown logs, every `confirmed_malicious` label and every `0.0.1-security`
+placeholder is excluded).
+
+**The unit is chosen, not inherited from the directory count.** The 42 case
+captures are 6 packages published by 3 npm accounts, and one of those accounts
+republished 36 times in 38 hours. So every rate is computed five ways:
+
+| unit | what it counts |
+|---|---|
+| `capture` | every snapshot — a rate of republishing as much as anything else |
+| `package` | one per name, represented by its earliest capture |
+| `publisher` | one per npm account — **the primary**: the independent events |
+| `package-any` | did this package **ever** demonstrate it, over all its captures |
+| `publisher-any` | did this operator ever demonstrate it — **read this one for what the code reaches** |
+
+The `-any` rows exist because the earliest-capture rule has a failure mode this
+corpus contains: `leb128x@1.0.0` requires `./_perf.js` and does not ship it, and
+the payload arrives in `1.0.1`. Both sides are expanded the same way — every
+matched control package brings every capture of it in the window — so the union
+rule gives the cases and the controls the same number of chances to fire.
+
+**What the run could have found is printed before what it did.** With three
+independent cases, the run states up front the largest control rate that would
+still leave a difference clear of zero. A rate that could never have separated
+is not a null result, and reading one as if it were is the mistake the statement
+exists to prevent.
+
+Intervals are Newcombe's hybrid score method on the *difference*, widened by
+Bonferroni for every interval the run prints, and the equivalence margin
+(±20pp, wider than `--size-control`'s ±10pp because the case side is three
+events) is declared in the source before any of it runs.
+
+**Two things the run declares about itself.** Two of the six case packages are
+named in this codebase as the reason a bound exists — `@siwatfa/yorn` for the
+function-body walk limit, `kit-hydration-vim` for the magic-byte file classifier
+— and both bounds blind capability answers. Excluding the packages would not
+remove their influence on how every other package is measured, so the run states
+them and then measures whether either bound decided its own package's answer.
+And the secret-path list is reported twice: as frozen, and repaired after the
+cases were opened, under a heading that says the repaired one is fitted to them
+and is not evidence from this run.
+
+```
+--ratio=<n>            controls drawn per case package (default 10)
+--since=<ISO>          widens the window past the cases' own span, and is
+                       recorded in the artifact because it decides which
+                       controls exist
+--until=<ISO>
+--output=<dir>         where the takedown logs live (default ./norte-guard-captures)
+--results-dir=<dir>    where the artifact lands (default capability-results)
+--json                 the whole report
+--no-save              print without writing the artifact
+```

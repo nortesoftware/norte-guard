@@ -1,0 +1,2914 @@
+{
+  "ranAt": "2026-08-19T04:40:08.596Z",
+  "engineVersion": "1.4.0",
+  "definitions": [
+    {
+      "capability": "credential_read",
+      "definition": "fs reached AND a string naming a secret reached a filesystem or path call (16 paths, plus .env files), OR process.env read of a token-shaped variable (11 words, 7 named)"
+    },
+    {
+      "capability": "network_egress",
+      "definition": "reaches net, http, https, dgram, or calls the global fetch"
+    },
+    {
+      "capability": "external_exec",
+      "definition": "reaches child_process"
+    },
+    {
+      "capability": "dynamic_code",
+      "definition": "reaches vm, or calls eval/Function, or a require/import specifier decided at runtime"
+    }
+  ],
+  "design": {
+    "matchRatio": 10,
+    "caliper": 0.3,
+    "equivalenceMargin": 0.2,
+    "primaryUnit": "publisher",
+    "excluded": [
+      "prezdentkxheiw",
+      "internallib_v756"
+    ]
+  },
+  "window": {
+    "since": "2026-08-15T01:25:09.223Z",
+    "until": "2026-08-17T13:45:43.881Z"
+  },
+  "cohort": {
+    "confirmedCaptures": 68,
+    "confirmedWithBytes": 42,
+    "excludedByName": [],
+    "cases": 42,
+    "casePackages": 6,
+    "casePublishers": [
+      {
+        "publisher": "siwatfa",
+        "packages": [
+          "@siwatfa/yorn"
+        ],
+        "captures": 36
+      },
+      {
+        "publisher": "ferrousdev",
+        "packages": [
+          "bcs-core",
+          "leb128x",
+          "sui-gql-core"
+        ],
+        "captures": 4
+      },
+      {
+        "publisher": "a_soclav",
+        "packages": [
+          "kit-hydration-vim",
+          "svelte-goal-vim"
+        ],
+        "captures": 2
+      }
+    ],
+    "unclassifiable": 0
+  },
+  "pool": {
+    "inWindow": 7611,
+    "withBytes": 7170,
+    "afterRemovedExcluded": 6983,
+    "removedKnown": 614,
+    "removedBySource": [
+      {
+        "source": "takedown-log (npm published 0.0.1-security)",
+        "names": 233,
+        "newHere": 233
+      },
+      {
+        "source": "takedowns.json (the sweep)",
+        "names": 73,
+        "newHere": 72
+      },
+      {
+        "source": "deletions.ndjson (gone from the registry)",
+        "names": 169,
+        "newHere": 168
+      },
+      {
+        "source": "ttr-log.ndjson (a version was unpublished)",
+        "names": 161,
+        "newHere": 129
+      },
+      {
+        "source": "this corpus (labelled or holding the placeholder)",
+        "names": 71,
+        "newHere": 12
+      }
+    ],
+    "distinctPackages": 4619,
+    "byCaptureReason": [
+      {
+        "reason": "watcher-threshold",
+        "packages": 3346
+      },
+      {
+        "reason": "quarantine-no-genome",
+        "packages": 1273
+      }
+    ]
+  },
+  "matches": [
+    {
+      "case": "@siwatfa/yorn@1.0.41",
+      "caseBytes": 26074395,
+      "controls": 10,
+      "shortfall": 0,
+      "controlBytes": [
+        26000145,
+        26236096,
+        26266382,
+        26353510,
+        26440070,
+        26541592,
+        25608144,
+        26592039,
+        26601148,
+        26605866
+      ],
+      "worstRatio": 1.02038286986141,
+      "controlCaptures": 11,
+      "controlCaptureBytes": [
+        26605866,
+        26601148,
+        26266382,
+        26541592,
+        26440070,
+        26592039,
+        26266382,
+        25608144,
+        26353510,
+        26000145,
+        26236096
+      ],
+      "controlPackages": [
+        "@5even7/dlc-ui",
+        "embedcss",
+        "@echo0321/sessionview-darwin-arm64",
+        "release-skill",
+        "@p4code/cli",
+        "@caupulican/pi-adaptative",
+        "brepjs-cad",
+        "@genepad/win32-x64",
+        "dsh-better-markdown",
+        "@vanillaskyai/sdk"
+      ]
+    },
+    {
+      "case": "kit-hydration-vim@1.0.0",
+      "caseBytes": 72387,
+      "controls": 10,
+      "shortfall": 0,
+      "controlBytes": [
+        72402,
+        72433,
+        72322,
+        72549,
+        72594,
+        72153,
+        72032,
+        72031,
+        71958,
+        72954
+      ],
+      "worstRatio": 1.294030696119469,
+      "controlCaptures": 29,
+      "controlCaptureBytes": [
+        72402,
+        73593,
+        76230,
+        79090,
+        80057,
+        80278,
+        80278,
+        80278,
+        80278,
+        87698,
+        72031,
+        87698,
+        87698,
+        87698,
+        89385,
+        91109,
+        72433,
+        91109,
+        72594,
+        72322,
+        72153,
+        82205,
+        82495,
+        72032,
+        72549,
+        91109,
+        93671,
+        71958,
+        72954
+      ],
+      "controlPackages": [
+        "@agentsignalnet/mcp",
+        "@rcarls/rc-navigation-rail",
+        "@oneworks/route-layout",
+        "@huayoung/huayoung-cli",
+        "@nomideusz/svelte-notify",
+        "@apollo-music/dsh-wecom-bridge",
+        "esia-mcp",
+        "@lim324/dsh-gitlab",
+        "hsy-core",
+        "tinkerdesk-skill-research-paper-writing"
+      ]
+    },
+    {
+      "case": "svelte-goal-vim@1.0.0",
+      "caseBytes": 8124,
+      "controls": 10,
+      "shortfall": 0,
+      "controlBytes": [
+        8123,
+        8120,
+        8132,
+        8151,
+        8169,
+        8073,
+        8184,
+        8186,
+        8188,
+        8049
+      ],
+      "worstRatio": 1.0093179276928812,
+      "controlCaptures": 11,
+      "controlCaptureBytes": [
+        8184,
+        8049,
+        8123,
+        8188,
+        8073,
+        8169,
+        8093,
+        8120,
+        8186,
+        8132,
+        8151
+      ],
+      "controlPackages": [
+        "dsh-latex-ocr",
+        "tokmesh",
+        "span-desktop",
+        "@cratestack/adapter-rtk",
+        "@totemheart/store-sqlite",
+        "@pagevistly/mcp",
+        "@basalf/cms",
+        "@oneworks/plugin-demo-extension",
+        "@deepseekcode/channel-matrix",
+        "aide-ai"
+      ]
+    },
+    {
+      "case": "bcs-core@1.0.0",
+      "caseBytes": 2302,
+      "controls": 10,
+      "shortfall": 0,
+      "controlBytes": [
+        2304,
+        2308,
+        2295,
+        2287,
+        2266,
+        2254,
+        2220,
+        2219,
+        2216,
+        2210
+      ],
+      "worstRatio": 1.0416289592760182,
+      "controlCaptures": 12,
+      "controlCaptureBytes": [
+        2219,
+        2308,
+        2210,
+        2210,
+        2218,
+        2266,
+        2220,
+        2287,
+        2295,
+        2304,
+        2216,
+        2254
+      ],
+      "controlPackages": [
+        "@hive-ui/detail-text",
+        "@deterministic-code/co-rule-gov-main-ci-green",
+        "@shlv/dsh-literature",
+        "rbxts-transformer-result",
+        "kboss-eslint-config",
+        "@hive-ui/truncate",
+        "kboss-unocss-preset",
+        "@solard/sdk",
+        "@hive-ui/paragraph",
+        "byayushdas"
+      ]
+    },
+    {
+      "case": "sui-gql-core@0.2.0",
+      "caseBytes": 4118,
+      "controls": 10,
+      "shortfall": 0,
+      "controlBytes": [
+        4108,
+        4076,
+        4060,
+        4177,
+        4034,
+        4208,
+        4023,
+        4229,
+        4233,
+        3987
+      ],
+      "worstRatio": 1.032856784549787,
+      "controlCaptures": 11,
+      "controlCaptureBytes": [
+        3987,
+        4233,
+        4233,
+        4208,
+        4034,
+        4108,
+        4229,
+        4076,
+        4060,
+        4177,
+        4023
+      ],
+      "controlPackages": [
+        "deathoffather-project",
+        "dsh-env-json",
+        "septima-widget-vue",
+        "@hive-ui/listbox-primitive",
+        "asijs-vite",
+        "create-express-esm-baimo",
+        "@hive-ui/syntax-highlighter-library",
+        "dsh-csv-to-md",
+        "@ohoyo/dsh-file-mention",
+        "ourmath-abdo-123"
+      ]
+    },
+    {
+      "case": "leb128x@1.0.0",
+      "caseBytes": 2404,
+      "controls": 10,
+      "shortfall": 0,
+      "controlBytes": [
+        2391,
+        2428,
+        2434,
+        2366,
+        2364,
+        2452,
+        2452,
+        2464,
+        2466,
+        2339
+      ],
+      "worstRatio": 1.6044093178036605,
+      "controlCaptures": 13,
+      "controlCaptureBytes": [
+        2452,
+        2466,
+        2529,
+        2464,
+        2846,
+        2452,
+        3857,
+        2391,
+        2364,
+        2434,
+        2366,
+        2428,
+        2339
+      ],
+      "controlPackages": [
+        "@jnardiello/pi-speed",
+        "@hive-ui/non-modal-dialog-primitive",
+        "@selfpentest/pentest-my-ci",
+        "@hive-ui/modal-primitive",
+        "ayushdas",
+        "mankai",
+        "eslint-plugin-tailwind-suggestions",
+        "routre-cli",
+        "@nikhil2211/zod-schema",
+        "tinkerdesk-skill-nano-pdf"
+      ]
+    }
+  ],
+  "outOfCaliper": [
+    {
+      "package": "eslint-plugin-tailwind-suggestions",
+      "version": "1.0.5",
+      "unpackedSize": 9109,
+      "ratio": 3.7891014975041606
+    },
+    {
+      "package": "eslint-plugin-tailwind-suggestions",
+      "version": "1.0.6",
+      "unpackedSize": 9109,
+      "ratio": 3.7891014975041606
+    },
+    {
+      "package": "eslint-plugin-tailwind-suggestions",
+      "version": "1.0.7",
+      "unpackedSize": 9109,
+      "ratio": 3.7891014975041606
+    },
+    {
+      "package": "eslint-plugin-tailwind-suggestions",
+      "version": "1.0.7",
+      "unpackedSize": 9109,
+      "ratio": 3.7891014975041606
+    },
+    {
+      "package": "eslint-plugin-tailwind-suggestions",
+      "version": "1.0.9",
+      "unpackedSize": 9109,
+      "ratio": 3.7891014975041606
+    },
+    {
+      "package": "eslint-plugin-tailwind-suggestions",
+      "version": "1.0.10",
+      "unpackedSize": 9111,
+      "ratio": 3.7899334442595674
+    },
+    {
+      "package": "eslint-plugin-tailwind-suggestions",
+      "version": "1.0.11",
+      "unpackedSize": 9111,
+      "ratio": 3.7899334442595674
+    },
+    {
+      "package": "eslint-plugin-tailwind-suggestions",
+      "version": "1.0.12",
+      "unpackedSize": 9111,
+      "ratio": 3.7899334442595674
+    },
+    {
+      "package": "eslint-plugin-tailwind-suggestions",
+      "version": "1.0.14",
+      "unpackedSize": 9111,
+      "ratio": 3.7899334442595674
+    },
+    {
+      "package": "rbxts-transformer-result",
+      "version": "3.1.1",
+      "unpackedSize": 15027,
+      "ratio": 6.527801911381409
+    },
+    {
+      "package": "@vanillaskyai/sdk",
+      "version": "0.4.3",
+      "unpackedSize": 2291833,
+      "ratio": 11.377092048155333
+    },
+    {
+      "package": "@vanillaskyai/sdk",
+      "version": "0.4.4",
+      "unpackedSize": 2289754,
+      "ratio": 11.387421967599998
+    }
+  ],
+  "endpointFamily": 20,
+  "endpointZ": 3.023341439041751,
+  "power": {
+    "nCases": 3,
+    "nControls": 49,
+    "maxControlsReaching": 10,
+    "statement": "With 3 cases and 49 controls, the most this run can find is: every case reaches a capability and at most 10 of 49 controls (20.4%) do. Anything commoner than that in the controls cannot be separated from it at this n, whatever the cases do."
+  },
+  "caseDetail": [
+    {
+      "package": "@siwatfa/yorn",
+      "publisher": "siwatfa",
+      "captures": 36,
+      "versions": [
+        "1.0.41",
+        "1.0.43",
+        "1.0.44",
+        "1.0.46",
+        "1.0.47",
+        "1.0.48",
+        "1.0.50",
+        "1.0.51",
+        "1.0.54",
+        "1.0.55",
+        "1.0.57",
+        "1.0.58",
+        "1.0.59",
+        "1.0.60",
+        "1.0.62",
+        "1.0.63",
+        "1.0.64",
+        "1.0.65",
+        "1.0.66",
+        "1.0.70",
+        "1.0.71",
+        "1.0.72",
+        "1.0.73",
+        "1.0.75",
+        "1.0.76",
+        "1.0.77",
+        "1.0.78",
+        "1.0.79",
+        "1.0.88",
+        "1.0.89",
+        "1.0.94",
+        "1.0.95",
+        "1.0.96",
+        "1.0.98",
+        "1.0.99"
+      ],
+      "unpackedSize": 26074395,
+      "opaque": [
+        "bytecode",
+        "minified"
+      ],
+      "refusals": 0,
+      "answers": {
+        "credential_read": "indeterminate",
+        "network_egress": "indeterminate",
+        "external_exec": "indeterminate",
+        "dynamic_code": "reached"
+      },
+      "evidence": [
+        "dynamic_code: calls Function at package/dist/load.cjs:2",
+        "dynamic_code: Function() over a body built at runtime at package/dist/load.cjs:1"
+      ]
+    },
+    {
+      "package": "leb128x",
+      "publisher": "ferrousdev",
+      "captures": 2,
+      "versions": [
+        "1.0.0",
+        "1.0.1"
+      ],
+      "unpackedSize": 2404,
+      "opaque": [],
+      "refusals": 0,
+      "answers": {
+        "credential_read": "indeterminate",
+        "network_egress": "reached",
+        "external_exec": "indeterminate",
+        "dynamic_code": "indeterminate"
+      },
+      "evidence": [
+        "network_egress: calls the global fetch at package/_perf.js:8"
+      ]
+    },
+    {
+      "package": "kit-hydration-vim",
+      "publisher": "a_soclav",
+      "captures": 1,
+      "versions": [
+        "1.0.0"
+      ],
+      "unpackedSize": 72387,
+      "opaque": [
+        "native-binary"
+      ],
+      "refusals": 0,
+      "answers": {
+        "credential_read": "indeterminate",
+        "network_egress": "indeterminate",
+        "external_exec": "reached",
+        "dynamic_code": "indeterminate"
+      },
+      "evidence": [
+        "external_exec: reaches node:child_process via gate > binding from package/dist/index.mjs"
+      ]
+    },
+    {
+      "package": "svelte-goal-vim",
+      "publisher": "a_soclav",
+      "captures": 1,
+      "versions": [
+        "1.0.0"
+      ],
+      "unpackedSize": 8124,
+      "opaque": [],
+      "refusals": 0,
+      "answers": {
+        "credential_read": "indeterminate",
+        "network_egress": "not-reached",
+        "external_exec": "not-reached",
+        "dynamic_code": "not-reached"
+      },
+      "evidence": []
+    },
+    {
+      "package": "bcs-core",
+      "publisher": "ferrousdev",
+      "captures": 1,
+      "versions": [
+        "1.0.0"
+      ],
+      "unpackedSize": 2302,
+      "opaque": [],
+      "refusals": 0,
+      "answers": {
+        "credential_read": "indeterminate",
+        "network_egress": "indeterminate",
+        "external_exec": "indeterminate",
+        "dynamic_code": "indeterminate"
+      },
+      "evidence": []
+    },
+    {
+      "package": "sui-gql-core",
+      "publisher": "ferrousdev",
+      "captures": 1,
+      "versions": [
+        "0.2.0"
+      ],
+      "unpackedSize": 4118,
+      "opaque": [],
+      "refusals": 0,
+      "answers": {
+        "credential_read": "not-reached",
+        "network_egress": "reached",
+        "external_exec": "not-reached",
+        "dynamic_code": "not-reached"
+      },
+      "evidence": [
+        "network_egress: calls the global fetch at package/index.js:39"
+      ]
+    }
+  ],
+  "contamination": {
+    "declared": [
+      {
+        "package": "@siwatfa/yorn",
+        "where": "src/reachability.ts, the comment above MAX_BODY_WALKS",
+        "what": "it is the named reason the function-body walk is bounded at 300, and that bound raises depth-limit, which blinds all four capabilities"
+      },
+      {
+        "package": "kit-hydration-vim",
+        "where": "test/analyzability.test.ts and docs/benchmark.md",
+        "what": "its calc.dat is the worked example for classifying a file by magic bytes rather than extension, and that classifier is what sets opaqueExecutable, which blinds all four capabilities"
+      },
+      {
+        "package": "svelte-goal-vim",
+        "where": "docs/benchmark.md",
+        "what": "reported there as a coverage result. It is a number that was printed about it, not a rule that was drawn from it"
+      }
+    ],
+    "blindedSolelyByDepthLimit": 0,
+    "blindedSolelyByOpacity": 0,
+    "statement": "No capability answer in the case cohort rests on either contaminated bound alone: every indeterminate is indeterminate for at least one other reason as well. The contamination is in the provenance and is declared; it is not in these numbers."
+  },
+  "comparisons": [
+    {
+      "unit": "capture",
+      "cases": {
+        "name": "confirmed removals",
+        "unit": "capture",
+        "members": 42,
+        "measured": 42,
+        "failures": [],
+        "medianUnpackedSize": 25941767,
+        "byCapability": [
+          {
+            "capability": "credential_read",
+            "reached": 0,
+            "notReached": 1,
+            "indeterminate": 41,
+            "overDeterminate": {
+              "successes": 0,
+              "n": 1,
+              "rate": 0,
+              "low": 0,
+              "high": 0.7934567085261071
+            },
+            "atLeast": 0,
+            "atMost": 0.9761904761904762
+          },
+          {
+            "capability": "network_egress",
+            "reached": 2,
+            "notReached": 1,
+            "indeterminate": 39,
+            "overDeterminate": {
+              "successes": 2,
+              "n": 3,
+              "rate": 0.6666666666666666,
+              "low": 0.20765495512648796,
+              "high": 0.9385096847238394
+            },
+            "atLeast": 0.047619047619047616,
+            "atMost": 0.9761904761904762
+          },
+          {
+            "capability": "external_exec",
+            "reached": 1,
+            "notReached": 3,
+            "indeterminate": 38,
+            "overDeterminate": {
+              "successes": 1,
+              "n": 4,
+              "rate": 0.25,
+              "low": 0.045586062644636216,
+              "high": 0.6993639475573634
+            },
+            "atLeast": 0.023809523809523808,
+            "atMost": 0.9285714285714286
+          },
+          {
+            "capability": "dynamic_code",
+            "reached": 36,
+            "notReached": 3,
+            "indeterminate": 3,
+            "overDeterminate": {
+              "successes": 36,
+              "n": 39,
+              "rate": 0.9230769230769231,
+              "low": 0.7967862687194474,
+              "high": 0.9734930859265043
+            },
+            "atLeast": 0.8571428571428571,
+            "atMost": 0.9285714285714286
+          }
+        ],
+        "refusedToAnalyse": 0,
+        "shipsOpaqueExecutable": 37,
+        "blindedAtEntry": 37,
+        "noEntryPoint": 0,
+        "reachesExternalDependency": 2,
+        "byCaptureReason": [
+          {
+            "reason": "watcher-threshold",
+            "members": 36
+          },
+          {
+            "reason": "quarantine-no-genome",
+            "members": 6
+          }
+        ],
+        "credentialEvidence": {
+          "secretPath": 0,
+          "tokenEnv": 0
+        }
+      },
+      "controls": {
+        "name": "size-matched, same days, not withdrawn",
+        "unit": "capture",
+        "members": 87,
+        "measured": 87,
+        "failures": [],
+        "medianUnpackedSize": 8169,
+        "byCapability": [
+          {
+            "capability": "credential_read",
+            "reached": 20,
+            "notReached": 20,
+            "indeterminate": 47,
+            "overDeterminate": {
+              "successes": 20,
+              "n": 40,
+              "rate": 0.5,
+              "low": 0.35199278797099753,
+              "high": 0.6480072120290025
+            },
+            "atLeast": 0.22988505747126436,
+            "atMost": 0.7701149425287356
+          },
+          {
+            "capability": "network_egress",
+            "reached": 28,
+            "notReached": 21,
+            "indeterminate": 38,
+            "overDeterminate": {
+              "successes": 28,
+              "n": 49,
+              "rate": 0.5714285714285714,
+              "low": 0.4327024751701555,
+              "high": 0.6997689110104294
+            },
+            "atLeast": 0.3218390804597701,
+            "atMost": 0.7586206896551724
+          },
+          {
+            "capability": "external_exec",
+            "reached": 17,
+            "notReached": 37,
+            "indeterminate": 33,
+            "overDeterminate": {
+              "successes": 17,
+              "n": 54,
+              "rate": 0.3148148148148148,
+              "low": 0.2067911428909822,
+              "high": 0.44743695591679633
+            },
+            "atLeast": 0.19540229885057472,
+            "atMost": 0.5747126436781609
+          },
+          {
+            "capability": "dynamic_code",
+            "reached": 6,
+            "notReached": 37,
+            "indeterminate": 44,
+            "overDeterminate": {
+              "successes": 6,
+              "n": 43,
+              "rate": 0.13953488372093023,
+              "low": 0.06555634267713946,
+              "high": 0.2726387659442569
+            },
+            "atLeast": 0.06896551724137931,
+            "atMost": 0.5747126436781609
+          }
+        ],
+        "refusedToAnalyse": 20,
+        "shipsOpaqueExecutable": 15,
+        "blindedAtEntry": 29,
+        "noEntryPoint": 0,
+        "reachesExternalDependency": 52,
+        "byCaptureReason": [
+          {
+            "reason": "quarantine-no-genome",
+            "members": 54
+          },
+          {
+            "reason": "watcher-threshold",
+            "members": 33
+          }
+        ],
+        "credentialEvidence": {
+          "secretPath": 1,
+          "tokenEnv": 19
+        }
+      },
+      "capabilities": [
+        {
+          "capability": "credential_read",
+          "unit": "capture",
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 1,
+              "rate": 0,
+              "low": 0,
+              "high": 0.7934567085261071
+            },
+            "b": {
+              "successes": 20,
+              "n": 40,
+              "rate": 0.5,
+              "low": 0.35199278797099753,
+              "high": 0.6480072120290025
+            },
+            "difference": -0.5,
+            "low": -0.6480072120290025,
+            "high": 0.3071429136885745,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 1,
+              "rate": 0,
+              "low": 0,
+              "high": 0.9013864421014691
+            },
+            "b": {
+              "successes": 20,
+              "n": 40,
+              "rate": 0.5,
+              "low": 0.2843561869329233,
+              "high": 0.7156438130670767
+            },
+            "difference": -0.5,
+            "low": -0.7156438130670767,
+            "high": 0.4268224059216811,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. -50.0pp, interval -71.6pp to +42.7pp, over 1 cases and 40 controls. Neither a difference nor the absence of one. The case side has 41 indeterminate, so the group is between 0.0% and 97.6% whatever this interval says."
+        },
+        {
+          "capability": "network_egress",
+          "unit": "capture",
+          "difference": {
+            "a": {
+              "successes": 2,
+              "n": 3,
+              "rate": 0.6666666666666666,
+              "low": 0.20765495512648796,
+              "high": 0.9385096847238394
+            },
+            "b": {
+              "successes": 28,
+              "n": 49,
+              "rate": 0.5714285714285714,
+              "low": 0.4327024751701555,
+              "high": 0.6997689110104294
+            },
+            "difference": 0.09523809523809523,
+            "low": -0.38137809636163506,
+            "high": 0.40043238786089586,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 2,
+              "n": 3,
+              "rate": 0.6666666666666666,
+              "low": 0.11333383898291355,
+              "high": 0.9690344573890561
+            },
+            "b": {
+              "successes": 28,
+              "n": 49,
+              "rate": 0.5714285714285714,
+              "low": 0.3636592830721075,
+              "high": 0.7567385247895175
+            },
+            "difference": 0.09523809523809523,
+            "low": -0.48830024712437026,
+            "high": 0.4621091325938535,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +9.5pp, interval -48.8pp to +46.2pp, over 3 cases and 49 controls. Neither a difference nor the absence of one. The case side has 39 indeterminate, so the group is between 4.8% and 97.6% whatever this interval says."
+        },
+        {
+          "capability": "external_exec",
+          "unit": "capture",
+          "difference": {
+            "a": {
+              "successes": 1,
+              "n": 4,
+              "rate": 0.25,
+              "low": 0.045586062644636216,
+              "high": 0.6993639475573634
+            },
+            "b": {
+              "successes": 17,
+              "n": 54,
+              "rate": 0.3148148148148148,
+              "low": 0.2067911428909822,
+              "high": 0.44743695591679633
+            },
+            "difference": -0.06481481481481483,
+            "low": -0.3084819855530915,
+            "high": 0.39735081681549655,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 1,
+              "n": 4,
+              "rate": 0.25,
+              "low": 0.02306812612188669,
+              "high": 0.8247317463465457
+            },
+            "b": {
+              "successes": 17,
+              "n": 54,
+              "rate": 0.3148148148148148,
+              "low": 0.16288998021839524,
+              "high": 0.5203565826506753
+            },
+            "difference": -0.06481481481481483,
+            "low": -0.37099367382850096,
+            "high": 0.5296578385727901,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. -6.5pp, interval -37.1pp to +53.0pp, over 4 cases and 54 controls. Neither a difference nor the absence of one. The case side has 38 indeterminate, so the group is between 2.4% and 92.9% whatever this interval says."
+        },
+        {
+          "capability": "dynamic_code",
+          "unit": "capture",
+          "difference": {
+            "a": {
+              "successes": 36,
+              "n": 39,
+              "rate": 0.9230769230769231,
+              "low": 0.7967862687194474,
+              "high": 0.9734930859265043
+            },
+            "b": {
+              "successes": 6,
+              "n": 43,
+              "rate": 0.13953488372093023,
+              "low": 0.06555634267713946,
+              "high": 0.2726387659442569
+            },
+            "difference": 0.7835420393559929,
+            "low": 0.6000591441287793,
+            "high": 0.8730664159885242,
+            "separated": true
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 36,
+              "n": 39,
+              "rate": 0.9230769230769231,
+              "low": 0.701554224595148,
+              "high": 0.9839379480233226
+            },
+            "b": {
+              "successes": 6,
+              "n": 43,
+              "rate": 0.13953488372093023,
+              "low": 0.04448208011331595,
+              "high": 0.3609715608094823
+            },
+            "difference": 0.7835420393559929,
+            "low": 0.4703224551939116,
+            "high": 0.8964096601831989,
+            "separated": true
+          },
+          "verdict": "SEPARATES. dynamic_code is reached by the cases +78.4pp more often than by size-matched packages npm did not remove (family-adjusted CI +47.0pp to +89.6pp, excludes zero). The case side has 3 indeterminate, so the group is between 85.7% and 92.9% whatever this interval says."
+        }
+      ],
+      "power": {
+        "nCases": 42,
+        "nControls": 87,
+        "maxControlsReaching": 69,
+        "statement": "With 42 cases and 87 controls, the most this run can find is: every case reaches a capability and at most 69 of 87 controls (79.3%) do. Anything commoner than that in the controls cannot be separated from it at this n, whatever the cases do."
+      }
+    },
+    {
+      "unit": "package",
+      "cases": {
+        "name": "confirmed removals",
+        "unit": "package",
+        "members": 6,
+        "measured": 6,
+        "failures": [],
+        "medianUnpackedSize": 8124,
+        "byCapability": [
+          {
+            "capability": "credential_read",
+            "reached": 0,
+            "notReached": 1,
+            "indeterminate": 5,
+            "overDeterminate": {
+              "successes": 0,
+              "n": 1,
+              "rate": 0,
+              "low": 0,
+              "high": 0.7934567085261071
+            },
+            "atLeast": 0,
+            "atMost": 0.8333333333333334
+          },
+          {
+            "capability": "network_egress",
+            "reached": 1,
+            "notReached": 1,
+            "indeterminate": 4,
+            "overDeterminate": {
+              "successes": 1,
+              "n": 2,
+              "rate": 0.5,
+              "low": 0.09452865480086614,
+              "high": 0.9054713451991339
+            },
+            "atLeast": 0.16666666666666666,
+            "atMost": 0.8333333333333334
+          },
+          {
+            "capability": "external_exec",
+            "reached": 1,
+            "notReached": 2,
+            "indeterminate": 3,
+            "overDeterminate": {
+              "successes": 1,
+              "n": 3,
+              "rate": 0.3333333333333333,
+              "low": 0.061490315276160556,
+              "high": 0.792345044873512
+            },
+            "atLeast": 0.16666666666666666,
+            "atMost": 0.6666666666666666
+          },
+          {
+            "capability": "dynamic_code",
+            "reached": 1,
+            "notReached": 2,
+            "indeterminate": 3,
+            "overDeterminate": {
+              "successes": 1,
+              "n": 3,
+              "rate": 0.3333333333333333,
+              "low": 0.061490315276160556,
+              "high": 0.792345044873512
+            },
+            "atLeast": 0.16666666666666666,
+            "atMost": 0.6666666666666666
+          }
+        ],
+        "refusedToAnalyse": 0,
+        "shipsOpaqueExecutable": 2,
+        "blindedAtEntry": 2,
+        "noEntryPoint": 0,
+        "reachesExternalDependency": 2,
+        "byCaptureReason": [
+          {
+            "reason": "quarantine-no-genome",
+            "members": 5
+          },
+          {
+            "reason": "watcher-threshold",
+            "members": 1
+          }
+        ],
+        "credentialEvidence": {
+          "secretPath": 0,
+          "tokenEnv": 0
+        }
+      },
+      "controls": {
+        "name": "size-matched, same days, not withdrawn",
+        "unit": "package",
+        "members": 60,
+        "measured": 60,
+        "failures": [],
+        "medianUnpackedSize": 8049,
+        "byCapability": [
+          {
+            "capability": "credential_read",
+            "reached": 3,
+            "notReached": 18,
+            "indeterminate": 39,
+            "overDeterminate": {
+              "successes": 3,
+              "n": 21,
+              "rate": 0.14285714285714285,
+              "low": 0.04980921798213492,
+              "high": 0.346364941492295
+            },
+            "atLeast": 0.05,
+            "atMost": 0.7
+          },
+          {
+            "capability": "network_egress",
+            "reached": 10,
+            "notReached": 19,
+            "indeterminate": 31,
+            "overDeterminate": {
+              "successes": 10,
+              "n": 29,
+              "rate": 0.3448275862068966,
+              "low": 0.19940508749190483,
+              "high": 0.5265522349284402
+            },
+            "atLeast": 0.16666666666666666,
+            "atMost": 0.6833333333333333
+          },
+          {
+            "capability": "external_exec",
+            "reached": 12,
+            "notReached": 21,
+            "indeterminate": 27,
+            "overDeterminate": {
+              "successes": 12,
+              "n": 33,
+              "rate": 0.36363636363636365,
+              "low": 0.22186966167959873,
+              "high": 0.5338412737846591
+            },
+            "atLeast": 0.2,
+            "atMost": 0.65
+          },
+          {
+            "capability": "dynamic_code",
+            "reached": 5,
+            "notReached": 21,
+            "indeterminate": 34,
+            "overDeterminate": {
+              "successes": 5,
+              "n": 26,
+              "rate": 0.19230769230769232,
+              "low": 0.08506935771788271,
+              "high": 0.37876636154649995
+            },
+            "atLeast": 0.08333333333333333,
+            "atMost": 0.65
+          }
+        ],
+        "refusedToAnalyse": 17,
+        "shipsOpaqueExecutable": 12,
+        "blindedAtEntry": 24,
+        "noEntryPoint": 0,
+        "reachesExternalDependency": 30,
+        "byCaptureReason": [
+          {
+            "reason": "quarantine-no-genome",
+            "members": 30
+          },
+          {
+            "reason": "watcher-threshold",
+            "members": 30
+          }
+        ],
+        "credentialEvidence": {
+          "secretPath": 1,
+          "tokenEnv": 2
+        }
+      },
+      "capabilities": [
+        {
+          "capability": "credential_read",
+          "unit": "package",
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 1,
+              "rate": 0,
+              "low": 0,
+              "high": 0.7934567085261071
+            },
+            "b": {
+              "successes": 3,
+              "n": 21,
+              "rate": 0.14285714285714285,
+              "low": 0.04980921798213492,
+              "high": 0.346364941492295
+            },
+            "difference": -0.14285714285714285,
+            "low": -0.346364941492295,
+            "high": 0.6560367578760076,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 1,
+              "rate": 0,
+              "low": 0,
+              "high": 0.9013864421014691
+            },
+            "b": {
+              "successes": 3,
+              "n": 21,
+              "rate": 0.14285714285714285,
+              "low": 0.03011104959023045,
+              "high": 0.47222124451717484
+            },
+            "difference": -0.14285714285714285,
+            "low": -0.47222124451717484,
+            "high": 0.765553116635393,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. -14.3pp, interval -47.2pp to +76.6pp, over 1 cases and 21 controls. Neither a difference nor the absence of one. The case side has 5 indeterminate, so the group is between 0.0% and 83.3% whatever this interval says."
+        },
+        {
+          "capability": "network_egress",
+          "unit": "package",
+          "difference": {
+            "a": {
+              "successes": 1,
+              "n": 2,
+              "rate": 0.5,
+              "low": 0.09452865480086614,
+              "high": 0.9054713451991339
+            },
+            "b": {
+              "successes": 10,
+              "n": 29,
+              "rate": 0.3448275862068966,
+              "low": 0.19940508749190483,
+              "high": 0.5265522349284402
+            },
+            "difference": 0.15517241379310343,
+            "low": -0.28915951138284385,
+            "high": 0.5859330374695334,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 1,
+              "n": 2,
+              "rate": 0.5,
+              "low": 0.04709925202884985,
+              "high": 0.9529007479711502
+            },
+            "b": {
+              "successes": 10,
+              "n": 29,
+              "rate": 0.3448275862068966,
+              "low": 0.14637545304414587,
+              "high": 0.6176554865860859
+            },
+            "difference": 0.15517241379310343,
+            "low": -0.37355639262673235,
+            "high": 0.6496441891955762,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +15.5pp, interval -37.4pp to +65.0pp, over 2 cases and 29 controls. Neither a difference nor the absence of one. The case side has 4 indeterminate, so the group is between 16.7% and 83.3% whatever this interval says."
+        },
+        {
+          "capability": "external_exec",
+          "unit": "package",
+          "difference": {
+            "a": {
+              "successes": 1,
+              "n": 3,
+              "rate": 0.3333333333333333,
+              "low": 0.061490315276160556,
+              "high": 0.792345044873512
+            },
+            "b": {
+              "successes": 12,
+              "n": 33,
+              "rate": 0.36363636363636365,
+              "low": 0.22186966167959873,
+              "high": 0.5338412737846591
+            },
+            "difference": -0.03030303030303033,
+            "low": -0.35103397347038623,
+            "high": 0.4501025786512599,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 1,
+              "n": 3,
+              "rate": 0.3333333333333333,
+              "low": 0.030965542610943808,
+              "high": 0.8866661610170863
+            },
+            "b": {
+              "successes": 12,
+              "n": 33,
+              "rate": 0.36363636363636365,
+              "low": 0.16723175365208987,
+              "high": 0.6191974524487267
+            },
+            "difference": -0.03030303030303033,
+            "low": -0.42620421870905073,
+            "high": 0.556852816994408,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. -3.0pp, interval -42.6pp to +55.7pp, over 3 cases and 33 controls. Neither a difference nor the absence of one. The case side has 3 indeterminate, so the group is between 16.7% and 66.7% whatever this interval says."
+        },
+        {
+          "capability": "dynamic_code",
+          "unit": "package",
+          "difference": {
+            "a": {
+              "successes": 1,
+              "n": 3,
+              "rate": 0.3333333333333333,
+              "low": 0.061490315276160556,
+              "high": 0.792345044873512
+            },
+            "b": {
+              "successes": 5,
+              "n": 26,
+              "rate": 0.19230769230769232,
+              "low": 0.08506935771788271,
+              "high": 0.37876636154649995
+            },
+            "difference": 0.141025641025641,
+            "low": -0.18861880652465438,
+            "high": 0.6123979055222277,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 1,
+              "n": 3,
+              "rate": 0.3333333333333333,
+              "low": 0.030965542610943808,
+              "high": 0.8866661610170863
+            },
+            "b": {
+              "successes": 5,
+              "n": 26,
+              "rate": 0.19230769230769232,
+              "low": 0.055991195685826445,
+              "high": 0.4886949229602293
+            },
+            "difference": 0.141025641025641,
+            "low": -0.2823792141191943,
+            "high": 0.710902299122599,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +14.1pp, interval -28.2pp to +71.1pp, over 3 cases and 26 controls. Neither a difference nor the absence of one. The case side has 3 indeterminate, so the group is between 16.7% and 66.7% whatever this interval says."
+        }
+      ],
+      "power": {
+        "nCases": 6,
+        "nControls": 60,
+        "maxControlsReaching": 21,
+        "statement": "With 6 cases and 60 controls, the most this run can find is: every case reaches a capability and at most 21 of 60 controls (35.0%) do. Anything commoner than that in the controls cannot be separated from it at this n, whatever the cases do."
+      }
+    },
+    {
+      "unit": "publisher",
+      "cases": {
+        "name": "confirmed removals",
+        "unit": "publisher",
+        "members": 3,
+        "measured": 3,
+        "failures": [],
+        "medianUnpackedSize": 72387,
+        "byCapability": [
+          {
+            "capability": "credential_read",
+            "reached": 0,
+            "notReached": 0,
+            "indeterminate": 3,
+            "overDeterminate": {
+              "successes": 0,
+              "n": 0,
+              "rate": null,
+              "low": null,
+              "high": null
+            },
+            "atLeast": 0,
+            "atMost": 1
+          },
+          {
+            "capability": "network_egress",
+            "reached": 0,
+            "notReached": 0,
+            "indeterminate": 3,
+            "overDeterminate": {
+              "successes": 0,
+              "n": 0,
+              "rate": null,
+              "low": null,
+              "high": null
+            },
+            "atLeast": 0,
+            "atMost": 1
+          },
+          {
+            "capability": "external_exec",
+            "reached": 1,
+            "notReached": 0,
+            "indeterminate": 2,
+            "overDeterminate": {
+              "successes": 1,
+              "n": 1,
+              "rate": 1,
+              "low": 0.2065432914738929,
+              "high": 1
+            },
+            "atLeast": 0.3333333333333333,
+            "atMost": 1
+          },
+          {
+            "capability": "dynamic_code",
+            "reached": 1,
+            "notReached": 0,
+            "indeterminate": 2,
+            "overDeterminate": {
+              "successes": 1,
+              "n": 1,
+              "rate": 1,
+              "low": 0.2065432914738929,
+              "high": 1
+            },
+            "atLeast": 0.3333333333333333,
+            "atMost": 1
+          }
+        ],
+        "refusedToAnalyse": 0,
+        "shipsOpaqueExecutable": 2,
+        "blindedAtEntry": 2,
+        "noEntryPoint": 0,
+        "reachesExternalDependency": 0,
+        "byCaptureReason": [
+          {
+            "reason": "quarantine-no-genome",
+            "members": 2
+          },
+          {
+            "reason": "watcher-threshold",
+            "members": 1
+          }
+        ],
+        "credentialEvidence": {
+          "secretPath": 0,
+          "tokenEnv": 0
+        }
+      },
+      "controls": {
+        "name": "size-matched, same days, not withdrawn",
+        "unit": "publisher",
+        "members": 49,
+        "measured": 49,
+        "failures": [],
+        "medianUnpackedSize": 8123,
+        "byCapability": [
+          {
+            "capability": "credential_read",
+            "reached": 3,
+            "notReached": 10,
+            "indeterminate": 36,
+            "overDeterminate": {
+              "successes": 3,
+              "n": 13,
+              "rate": 0.23076923076923078,
+              "low": 0.08179379092465713,
+              "high": 0.5025687399512693
+            },
+            "atLeast": 0.061224489795918366,
+            "atMost": 0.7959183673469388
+          },
+          {
+            "capability": "network_egress",
+            "reached": 10,
+            "notReached": 11,
+            "indeterminate": 28,
+            "overDeterminate": {
+              "successes": 10,
+              "n": 21,
+              "rate": 0.47619047619047616,
+              "low": 0.28343712296762946,
+              "high": 0.6763078209973324
+            },
+            "atLeast": 0.20408163265306123,
+            "atMost": 0.7755102040816326
+          },
+          {
+            "capability": "external_exec",
+            "reached": 12,
+            "notReached": 13,
+            "indeterminate": 24,
+            "overDeterminate": {
+              "successes": 12,
+              "n": 25,
+              "rate": 0.48,
+              "low": 0.30031003928960015,
+              "high": 0.6650178204685269
+            },
+            "atLeast": 0.24489795918367346,
+            "atMost": 0.7346938775510204
+          },
+          {
+            "capability": "dynamic_code",
+            "reached": 5,
+            "notReached": 13,
+            "indeterminate": 31,
+            "overDeterminate": {
+              "successes": 5,
+              "n": 18,
+              "rate": 0.2777777777777778,
+              "low": 0.12499569146355474,
+              "high": 0.5087307754619452
+            },
+            "atLeast": 0.10204081632653061,
+            "atMost": 0.7346938775510204
+          }
+        ],
+        "refusedToAnalyse": 15,
+        "shipsOpaqueExecutable": 12,
+        "blindedAtEntry": 22,
+        "noEntryPoint": 0,
+        "reachesExternalDependency": 21,
+        "byCaptureReason": [
+          {
+            "reason": "quarantine-no-genome",
+            "members": 26
+          },
+          {
+            "reason": "watcher-threshold",
+            "members": 23
+          }
+        ],
+        "credentialEvidence": {
+          "secretPath": 1,
+          "tokenEnv": 2
+        }
+      },
+      "capabilities": [
+        {
+          "capability": "credential_read",
+          "unit": "publisher",
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 0,
+              "rate": null,
+              "low": null,
+              "high": null
+            },
+            "b": {
+              "successes": 3,
+              "n": 13,
+              "rate": 0.23076923076923078,
+              "low": 0.08179379092465713,
+              "high": 0.5025687399512693
+            },
+            "difference": null,
+            "low": null,
+            "high": null,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 0,
+              "rate": null,
+              "low": null,
+              "high": null
+            },
+            "b": {
+              "successes": 3,
+              "n": 13,
+              "rate": 0.23076923076923078,
+              "low": 0.04927599377735126,
+              "high": 0.6345626524817751
+            },
+            "difference": null,
+            "low": null,
+            "high": null,
+            "separated": false
+          },
+          "verdict": "Not calculable. 0 of the cases and 13 of the controls got a yes-or-no answer for credential_read; the rest were indeterminate, and a rate over an empty denominator is not a rate."
+        },
+        {
+          "capability": "network_egress",
+          "unit": "publisher",
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 0,
+              "rate": null,
+              "low": null,
+              "high": null
+            },
+            "b": {
+              "successes": 10,
+              "n": 21,
+              "rate": 0.47619047619047616,
+              "low": 0.28343712296762946,
+              "high": 0.6763078209973324
+            },
+            "difference": null,
+            "low": null,
+            "high": null,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 0,
+              "rate": null,
+              "low": null,
+              "high": null
+            },
+            "b": {
+              "successes": 10,
+              "n": 21,
+              "rate": 0.47619047619047616,
+              "low": 0.20828106910697902,
+              "high": 0.7585410838335147
+            },
+            "difference": null,
+            "low": null,
+            "high": null,
+            "separated": false
+          },
+          "verdict": "Not calculable. 0 of the cases and 21 of the controls got a yes-or-no answer for network_egress; the rest were indeterminate, and a rate over an empty denominator is not a rate."
+        },
+        {
+          "capability": "external_exec",
+          "unit": "publisher",
+          "difference": {
+            "a": {
+              "successes": 1,
+              "n": 1,
+              "rate": 1,
+              "low": 0.2065432914738929,
+              "high": 1
+            },
+            "b": {
+              "successes": 12,
+              "n": 25,
+              "rate": 0.48,
+              "low": 0.30031003928960015,
+              "high": 0.6650178204685269
+            },
+            "difference": 0.52,
+            "low": -0.29474237780786117,
+            "high": 0.6996899607103999,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 1,
+              "n": 1,
+              "rate": 1,
+              "low": 0.09861355789853093,
+              "high": 1
+            },
+            "b": {
+              "successes": 12,
+              "n": 25,
+              "rate": 0.48,
+              "low": 0.22679124562291358,
+              "high": 0.7439181094661036
+            },
+            "difference": 0.52,
+            "low": -0.419228559248763,
+            "high": 0.7732087543770865,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +52.0pp, interval -41.9pp to +77.3pp, over 1 cases and 25 controls. Neither a difference nor the absence of one. The case side has 2 indeterminate, so the group is between 33.3% and 100.0% whatever this interval says."
+        },
+        {
+          "capability": "dynamic_code",
+          "unit": "publisher",
+          "difference": {
+            "a": {
+              "successes": 1,
+              "n": 1,
+              "rate": 1,
+              "low": 0.2065432914738929,
+              "high": 1
+            },
+            "b": {
+              "successes": 5,
+              "n": 18,
+              "rate": 0.2777777777777778,
+              "low": 0.12499569146355474,
+              "high": 0.5087307754619452
+            },
+            "difference": 0.7222222222222222,
+            "low": -0.10416318147534231,
+            "high": 0.8750043085364453,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 1,
+              "n": 1,
+              "rate": 1,
+              "low": 0.09861355789853093,
+              "high": 1
+            },
+            "b": {
+              "successes": 5,
+              "n": 18,
+              "rate": 0.2777777777777778,
+              "low": 0.08212621284582028,
+              "high": 0.6231123622550974
+            },
+            "difference": 0.7222222222222222,
+            "low": -0.24305156963191699,
+            "high": 0.9178737871541798,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +72.2pp, interval -24.3pp to +91.8pp, over 1 cases and 18 controls. Neither a difference nor the absence of one. The case side has 2 indeterminate, so the group is between 33.3% and 100.0% whatever this interval says."
+        }
+      ],
+      "power": {
+        "nCases": 3,
+        "nControls": 49,
+        "maxControlsReaching": 10,
+        "statement": "With 3 cases and 49 controls, the most this run can find is: every case reaches a capability and at most 10 of 49 controls (20.4%) do. Anything commoner than that in the controls cannot be separated from it at this n, whatever the cases do."
+      }
+    },
+    {
+      "unit": "package-any",
+      "cases": {
+        "name": "confirmed removals",
+        "unit": "package-any",
+        "members": 6,
+        "measured": 6,
+        "failures": [],
+        "medianUnpackedSize": 8124,
+        "byCapability": [
+          {
+            "capability": "credential_read",
+            "reached": 0,
+            "notReached": 1,
+            "indeterminate": 5,
+            "overDeterminate": {
+              "successes": 0,
+              "n": 1,
+              "rate": 0,
+              "low": 0,
+              "high": 0.7934567085261071
+            },
+            "atLeast": 0,
+            "atMost": 0.8333333333333334
+          },
+          {
+            "capability": "network_egress",
+            "reached": 2,
+            "notReached": 1,
+            "indeterminate": 3,
+            "overDeterminate": {
+              "successes": 2,
+              "n": 3,
+              "rate": 0.6666666666666666,
+              "low": 0.20765495512648796,
+              "high": 0.9385096847238394
+            },
+            "atLeast": 0.3333333333333333,
+            "atMost": 0.8333333333333334
+          },
+          {
+            "capability": "external_exec",
+            "reached": 1,
+            "notReached": 2,
+            "indeterminate": 3,
+            "overDeterminate": {
+              "successes": 1,
+              "n": 3,
+              "rate": 0.3333333333333333,
+              "low": 0.061490315276160556,
+              "high": 0.792345044873512
+            },
+            "atLeast": 0.16666666666666666,
+            "atMost": 0.6666666666666666
+          },
+          {
+            "capability": "dynamic_code",
+            "reached": 1,
+            "notReached": 2,
+            "indeterminate": 3,
+            "overDeterminate": {
+              "successes": 1,
+              "n": 3,
+              "rate": 0.3333333333333333,
+              "low": 0.061490315276160556,
+              "high": 0.792345044873512
+            },
+            "atLeast": 0.16666666666666666,
+            "atMost": 0.6666666666666666
+          }
+        ],
+        "refusedToAnalyse": 0,
+        "shipsOpaqueExecutable": 2,
+        "blindedAtEntry": 2,
+        "noEntryPoint": 0,
+        "reachesExternalDependency": 2,
+        "byCaptureReason": [
+          {
+            "reason": "quarantine-no-genome",
+            "members": 5
+          },
+          {
+            "reason": "watcher-threshold",
+            "members": 1
+          }
+        ],
+        "credentialEvidence": {
+          "secretPath": 0,
+          "tokenEnv": 0
+        }
+      },
+      "controls": {
+        "name": "size-matched, same days, not withdrawn",
+        "unit": "package-any",
+        "members": 60,
+        "measured": 60,
+        "failures": [],
+        "medianUnpackedSize": 8049,
+        "byCapability": [
+          {
+            "capability": "credential_read",
+            "reached": 3,
+            "notReached": 18,
+            "indeterminate": 39,
+            "overDeterminate": {
+              "successes": 3,
+              "n": 21,
+              "rate": 0.14285714285714285,
+              "low": 0.04980921798213492,
+              "high": 0.346364941492295
+            },
+            "atLeast": 0.05,
+            "atMost": 0.7
+          },
+          {
+            "capability": "network_egress",
+            "reached": 10,
+            "notReached": 19,
+            "indeterminate": 31,
+            "overDeterminate": {
+              "successes": 10,
+              "n": 29,
+              "rate": 0.3448275862068966,
+              "low": 0.19940508749190483,
+              "high": 0.5265522349284402
+            },
+            "atLeast": 0.16666666666666666,
+            "atMost": 0.6833333333333333
+          },
+          {
+            "capability": "external_exec",
+            "reached": 13,
+            "notReached": 20,
+            "indeterminate": 27,
+            "overDeterminate": {
+              "successes": 13,
+              "n": 33,
+              "rate": 0.3939393939393939,
+              "low": 0.24682882231508207,
+              "high": 0.5631685719348962
+            },
+            "atLeast": 0.21666666666666667,
+            "atMost": 0.6666666666666666
+          },
+          {
+            "capability": "dynamic_code",
+            "reached": 5,
+            "notReached": 20,
+            "indeterminate": 35,
+            "overDeterminate": {
+              "successes": 5,
+              "n": 25,
+              "rate": 0.2,
+              "low": 0.08860454100652485,
+              "high": 0.3913133553653825
+            },
+            "atLeast": 0.08333333333333333,
+            "atMost": 0.6666666666666666
+          }
+        ],
+        "refusedToAnalyse": 17,
+        "shipsOpaqueExecutable": 12,
+        "blindedAtEntry": 24,
+        "noEntryPoint": 0,
+        "reachesExternalDependency": 30,
+        "byCaptureReason": [
+          {
+            "reason": "quarantine-no-genome",
+            "members": 30
+          },
+          {
+            "reason": "watcher-threshold",
+            "members": 30
+          }
+        ],
+        "credentialEvidence": {
+          "secretPath": 1,
+          "tokenEnv": 2
+        }
+      },
+      "capabilities": [
+        {
+          "capability": "credential_read",
+          "unit": "package-any",
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 1,
+              "rate": 0,
+              "low": 0,
+              "high": 0.7934567085261071
+            },
+            "b": {
+              "successes": 3,
+              "n": 21,
+              "rate": 0.14285714285714285,
+              "low": 0.04980921798213492,
+              "high": 0.346364941492295
+            },
+            "difference": -0.14285714285714285,
+            "low": -0.346364941492295,
+            "high": 0.6560367578760076,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 1,
+              "rate": 0,
+              "low": 0,
+              "high": 0.9013864421014691
+            },
+            "b": {
+              "successes": 3,
+              "n": 21,
+              "rate": 0.14285714285714285,
+              "low": 0.03011104959023045,
+              "high": 0.47222124451717484
+            },
+            "difference": -0.14285714285714285,
+            "low": -0.47222124451717484,
+            "high": 0.765553116635393,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. -14.3pp, interval -47.2pp to +76.6pp, over 1 cases and 21 controls. Neither a difference nor the absence of one. The case side has 5 indeterminate, so the group is between 0.0% and 83.3% whatever this interval says."
+        },
+        {
+          "capability": "network_egress",
+          "unit": "package-any",
+          "difference": {
+            "a": {
+              "successes": 2,
+              "n": 3,
+              "rate": 0.6666666666666666,
+              "low": 0.20765495512648796,
+              "high": 0.9385096847238394
+            },
+            "b": {
+              "successes": 10,
+              "n": 29,
+              "rate": 0.3448275862068966,
+              "low": 0.19940508749190483,
+              "high": 0.5265522349284402
+            },
+            "difference": 0.32183908045977005,
+            "low": -0.17183652080487888,
+            "high": 0.6301349279811795,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 2,
+              "n": 3,
+              "rate": 0.6666666666666666,
+              "low": 0.11333383898291355,
+              "high": 0.9690344573890561
+            },
+            "b": {
+              "successes": 10,
+              "n": 29,
+              "rate": 0.3448275862068966,
+              "low": 0.14637545304414587,
+              "high": 0.6176554865860859
+            },
+            "difference": 0.32183908045977005,
+            "low": -0.29509874575760076,
+            "high": 0.6835150819074538,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +32.2pp, interval -29.5pp to +68.4pp, over 3 cases and 29 controls. Neither a difference nor the absence of one. The case side has 3 indeterminate, so the group is between 33.3% and 83.3% whatever this interval says."
+        },
+        {
+          "capability": "external_exec",
+          "unit": "package-any",
+          "difference": {
+            "a": {
+              "successes": 1,
+              "n": 3,
+              "rate": 0.3333333333333333,
+              "low": 0.061490315276160556,
+              "high": 0.792345044873512
+            },
+            "b": {
+              "successes": 13,
+              "n": 33,
+              "rate": 0.3939393939393939,
+              "low": 0.24682882231508207,
+              "high": 0.5631685719348962
+            },
+            "difference": -0.06060606060606061,
+            "low": -0.38082027195756474,
+            "high": 0.42140355715553135,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 1,
+              "n": 3,
+              "rate": 0.3333333333333333,
+              "low": 0.030965542610943808,
+              "high": 0.8866661610170863
+            },
+            "b": {
+              "successes": 13,
+              "n": 33,
+              "rate": 0.3939393939393939,
+              "low": 0.18821764828798038,
+              "high": 0.6456717342348769
+            },
+            "difference": -0.06060606060606061,
+            "low": -0.4540465923474911,
+            "high": 0.5297316857954064,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. -6.1pp, interval -45.4pp to +53.0pp, over 3 cases and 33 controls. Neither a difference nor the absence of one. The case side has 3 indeterminate, so the group is between 16.7% and 66.7% whatever this interval says."
+        },
+        {
+          "capability": "dynamic_code",
+          "unit": "package-any",
+          "difference": {
+            "a": {
+              "successes": 1,
+              "n": 3,
+              "rate": 0.3333333333333333,
+              "low": 0.061490315276160556,
+              "high": 0.792345044873512
+            },
+            "b": {
+              "successes": 5,
+              "n": 25,
+              "rate": 0.2,
+              "low": 0.08860454100652485,
+              "high": 0.3913133553653825
+            },
+            "difference": 0.1333333333333333,
+            "low": -0.19908120667295687,
+            "high": 0.6056687010705071,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 1,
+              "n": 3,
+              "rate": 0.3333333333333333,
+              "low": 0.030965542610943808,
+              "high": 0.8866661610170863
+            },
+            "b": {
+              "successes": 5,
+              "n": 25,
+              "rate": 0.2,
+              "low": 0.05830946755288288,
+              "high": 0.5023308587823758
+            },
+            "difference": 0.1333333333333333,
+            "low": -0.2942531831033144,
+            "high": 0.7045193145843138,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +13.3pp, interval -29.4pp to +70.5pp, over 3 cases and 25 controls. Neither a difference nor the absence of one. The case side has 3 indeterminate, so the group is between 16.7% and 66.7% whatever this interval says."
+        }
+      ],
+      "power": {
+        "nCases": 6,
+        "nControls": 60,
+        "maxControlsReaching": 21,
+        "statement": "With 6 cases and 60 controls, the most this run can find is: every case reaches a capability and at most 21 of 60 controls (35.0%) do. Anything commoner than that in the controls cannot be separated from it at this n, whatever the cases do."
+      }
+    },
+    {
+      "unit": "publisher-any",
+      "cases": {
+        "name": "confirmed removals",
+        "unit": "publisher-any",
+        "members": 3,
+        "measured": 3,
+        "failures": [],
+        "medianUnpackedSize": 72387,
+        "byCapability": [
+          {
+            "capability": "credential_read",
+            "reached": 0,
+            "notReached": 0,
+            "indeterminate": 3,
+            "overDeterminate": {
+              "successes": 0,
+              "n": 0,
+              "rate": null,
+              "low": null,
+              "high": null
+            },
+            "atLeast": 0,
+            "atMost": 1
+          },
+          {
+            "capability": "network_egress",
+            "reached": 1,
+            "notReached": 0,
+            "indeterminate": 2,
+            "overDeterminate": {
+              "successes": 1,
+              "n": 1,
+              "rate": 1,
+              "low": 0.2065432914738929,
+              "high": 1
+            },
+            "atLeast": 0.3333333333333333,
+            "atMost": 1
+          },
+          {
+            "capability": "external_exec",
+            "reached": 1,
+            "notReached": 0,
+            "indeterminate": 2,
+            "overDeterminate": {
+              "successes": 1,
+              "n": 1,
+              "rate": 1,
+              "low": 0.2065432914738929,
+              "high": 1
+            },
+            "atLeast": 0.3333333333333333,
+            "atMost": 1
+          },
+          {
+            "capability": "dynamic_code",
+            "reached": 1,
+            "notReached": 0,
+            "indeterminate": 2,
+            "overDeterminate": {
+              "successes": 1,
+              "n": 1,
+              "rate": 1,
+              "low": 0.2065432914738929,
+              "high": 1
+            },
+            "atLeast": 0.3333333333333333,
+            "atMost": 1
+          }
+        ],
+        "refusedToAnalyse": 0,
+        "shipsOpaqueExecutable": 2,
+        "blindedAtEntry": 2,
+        "noEntryPoint": 0,
+        "reachesExternalDependency": 0,
+        "byCaptureReason": [
+          {
+            "reason": "quarantine-no-genome",
+            "members": 2
+          },
+          {
+            "reason": "watcher-threshold",
+            "members": 1
+          }
+        ],
+        "credentialEvidence": {
+          "secretPath": 0,
+          "tokenEnv": 0
+        }
+      },
+      "controls": {
+        "name": "size-matched, same days, not withdrawn",
+        "unit": "publisher-any",
+        "members": 49,
+        "measured": 49,
+        "failures": [],
+        "medianUnpackedSize": 8123,
+        "byCapability": [
+          {
+            "capability": "credential_read",
+            "reached": 3,
+            "notReached": 10,
+            "indeterminate": 36,
+            "overDeterminate": {
+              "successes": 3,
+              "n": 13,
+              "rate": 0.23076923076923078,
+              "low": 0.08179379092465713,
+              "high": 0.5025687399512693
+            },
+            "atLeast": 0.061224489795918366,
+            "atMost": 0.7959183673469388
+          },
+          {
+            "capability": "network_egress",
+            "reached": 10,
+            "notReached": 11,
+            "indeterminate": 28,
+            "overDeterminate": {
+              "successes": 10,
+              "n": 21,
+              "rate": 0.47619047619047616,
+              "low": 0.28343712296762946,
+              "high": 0.6763078209973324
+            },
+            "atLeast": 0.20408163265306123,
+            "atMost": 0.7755102040816326
+          },
+          {
+            "capability": "external_exec",
+            "reached": 13,
+            "notReached": 12,
+            "indeterminate": 24,
+            "overDeterminate": {
+              "successes": 13,
+              "n": 25,
+              "rate": 0.52,
+              "low": 0.334982179531473,
+              "high": 0.6996899607103998
+            },
+            "atLeast": 0.2653061224489796,
+            "atMost": 0.7551020408163265
+          },
+          {
+            "capability": "dynamic_code",
+            "reached": 5,
+            "notReached": 12,
+            "indeterminate": 32,
+            "overDeterminate": {
+              "successes": 5,
+              "n": 17,
+              "rate": 0.29411764705882354,
+              "low": 0.13279793865556402,
+              "high": 0.5313353332621391
+            },
+            "atLeast": 0.10204081632653061,
+            "atMost": 0.7551020408163265
+          }
+        ],
+        "refusedToAnalyse": 15,
+        "shipsOpaqueExecutable": 12,
+        "blindedAtEntry": 22,
+        "noEntryPoint": 0,
+        "reachesExternalDependency": 21,
+        "byCaptureReason": [
+          {
+            "reason": "quarantine-no-genome",
+            "members": 26
+          },
+          {
+            "reason": "watcher-threshold",
+            "members": 23
+          }
+        ],
+        "credentialEvidence": {
+          "secretPath": 1,
+          "tokenEnv": 2
+        }
+      },
+      "capabilities": [
+        {
+          "capability": "credential_read",
+          "unit": "publisher-any",
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 0,
+              "rate": null,
+              "low": null,
+              "high": null
+            },
+            "b": {
+              "successes": 3,
+              "n": 13,
+              "rate": 0.23076923076923078,
+              "low": 0.08179379092465713,
+              "high": 0.5025687399512693
+            },
+            "difference": null,
+            "low": null,
+            "high": null,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 0,
+              "rate": null,
+              "low": null,
+              "high": null
+            },
+            "b": {
+              "successes": 3,
+              "n": 13,
+              "rate": 0.23076923076923078,
+              "low": 0.04927599377735126,
+              "high": 0.6345626524817751
+            },
+            "difference": null,
+            "low": null,
+            "high": null,
+            "separated": false
+          },
+          "verdict": "Not calculable. 0 of the cases and 13 of the controls got a yes-or-no answer for credential_read; the rest were indeterminate, and a rate over an empty denominator is not a rate."
+        },
+        {
+          "capability": "network_egress",
+          "unit": "publisher-any",
+          "difference": {
+            "a": {
+              "successes": 1,
+              "n": 1,
+              "rate": 1,
+              "low": 0.2065432914738929,
+              "high": 1
+            },
+            "b": {
+              "successes": 10,
+              "n": 21,
+              "rate": 0.47619047619047616,
+              "low": 0.28343712296762946,
+              "high": 0.6763078209973324
+            },
+            "difference": 0.5238095238095238,
+            "low": -0.2944939040200496,
+            "high": 0.7165628770323705,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 1,
+              "n": 1,
+              "rate": 1,
+              "low": 0.09861355789853093,
+              "high": 1
+            },
+            "b": {
+              "successes": 10,
+              "n": 21,
+              "rate": 0.47619047619047616,
+              "low": 0.20828106910697902,
+              "high": 0.7585410838335147
+            },
+            "difference": 0.5238095238095238,
+            "low": -0.42076412797245233,
+            "high": 0.791718930893021,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +52.4pp, interval -42.1pp to +79.2pp, over 1 cases and 21 controls. Neither a difference nor the absence of one. The case side has 2 indeterminate, so the group is between 33.3% and 100.0% whatever this interval says."
+        },
+        {
+          "capability": "external_exec",
+          "unit": "publisher-any",
+          "difference": {
+            "a": {
+              "successes": 1,
+              "n": 1,
+              "rate": 1,
+              "low": 0.2065432914738929,
+              "high": 1
+            },
+            "b": {
+              "successes": 13,
+              "n": 25,
+              "rate": 0.52,
+              "low": 0.334982179531473,
+              "high": 0.6996899607103998
+            },
+            "difference": 0.48,
+            "low": -0.33354903373133493,
+            "high": 0.665017820468527,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 1,
+              "n": 1,
+              "rate": 1,
+              "low": 0.09861355789853093,
+              "high": 1
+            },
+            "b": {
+              "successes": 13,
+              "n": 25,
+              "rate": 0.52,
+              "low": 0.2560818905338964,
+              "high": 0.7732087543770865
+            },
+            "difference": 0.48,
+            "low": -0.4562757026098353,
+            "high": 0.7439181094661036,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +48.0pp, interval -45.6pp to +74.4pp, over 1 cases and 25 controls. Neither a difference nor the absence of one. The case side has 2 indeterminate, so the group is between 33.3% and 100.0% whatever this interval says."
+        },
+        {
+          "capability": "dynamic_code",
+          "unit": "publisher-any",
+          "difference": {
+            "a": {
+              "successes": 1,
+              "n": 1,
+              "rate": 1,
+              "low": 0.2065432914738929,
+              "high": 1
+            },
+            "b": {
+              "successes": 5,
+              "n": 17,
+              "rate": 0.29411764705882354,
+              "low": 0.13279793865556402,
+              "high": 0.5313353332621391
+            },
+            "difference": 0.7058823529411764,
+            "low": -0.12227571104947166,
+            "high": 0.8672020613444359,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 1,
+              "n": 1,
+              "rate": 1,
+              "low": 0.09861355789853093,
+              "high": 1
+            },
+            "b": {
+              "successes": 5,
+              "n": 17,
+              "rate": 0.29411764705882354,
+              "low": 0.08722039456288527,
+              "high": 0.6449968555348442
+            },
+            "difference": 0.7058823529411764,
+            "low": -0.2613889311074631,
+            "high": 0.9127796054371147,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +70.6pp, interval -26.1pp to +91.3pp, over 1 cases and 17 controls. Neither a difference nor the absence of one. The case side has 2 indeterminate, so the group is between 33.3% and 100.0% whatever this interval says."
+        }
+      ],
+      "power": {
+        "nCases": 3,
+        "nControls": 49,
+        "maxControlsReaching": 10,
+        "statement": "With 3 cases and 49 controls, the most this run can find is: every case reaches a capability and at most 10 of 49 controls (20.4%) do. Anything commoner than that in the controls cannot be separated from it at this n, whatever the cases do."
+      }
+    }
+  ],
+  "headline": {
+    "unit": "publisher",
+    "nCases": 3,
+    "nControls": 49,
+    "separated": [],
+    "inconclusive": [
+      "external_exec",
+      "dynamic_code"
+    ],
+    "notCalculable": [
+      "credential_read",
+      "network_egress"
+    ],
+    "separatesOnlyElsewhere": [
+      {
+        "capability": "dynamic_code",
+        "unit": "capture",
+        "caseShare": "36 of 42 case captures are @siwatfa/yorn"
+      }
+    ],
+    "statement": "NOTHING IS ESTABLISHED. At the publisher unit — 3 cases against 49 controls, the unit declared before the run because it is the one whose members are independent events — not one of the four capabilities separates the confirmed removals from size-matched packages npm did not remove. credential_read and network_egress are not calculable at all: every case is indeterminate, and a rate over an empty denominator is not a rate. external_exec and dynamic_code are inconclusive — the interval includes zero. dynamic_code DOES separate at the capture unit, and that is not a second measurement of the same thing: 36 of 42 case captures are @siwatfa/yorn, so a rate there is a rate of republishing. Read it as a fact about one operator's release count, not about malicious packages."
+  },
+  "posthoc": {
+    "note": "The secret-path half of credential_read, repaired after the cases were opened: SECRET_PATHS holds joined paths and real code writes path.join(home, \".aws\", \"credentials\"), whose arguments are three strings none of which is in the list. This is what the repaired definition finds. It is not validated by this run and cannot be — a definition changed after seeing the cases is fitted to them — and it is here so the next confirmed sample can be the test of it rather than the third place it is rediscovered.",
+    "cases": {
+      "name": "confirmed removals, post-hoc credential_read",
+      "unit": "publisher-any",
+      "members": 3,
+      "measured": 3,
+      "failures": [],
+      "medianUnpackedSize": 72387,
+      "byCapability": [
+        {
+          "capability": "credential_read",
+          "reached": 1,
+          "notReached": 0,
+          "indeterminate": 2,
+          "overDeterminate": {
+            "successes": 1,
+            "n": 1,
+            "rate": 1,
+            "low": 0.2065432914738929,
+            "high": 1
+          },
+          "atLeast": 0.3333333333333333,
+          "atMost": 1
+        },
+        {
+          "capability": "network_egress",
+          "reached": 1,
+          "notReached": 0,
+          "indeterminate": 2,
+          "overDeterminate": {
+            "successes": 1,
+            "n": 1,
+            "rate": 1,
+            "low": 0.2065432914738929,
+            "high": 1
+          },
+          "atLeast": 0.3333333333333333,
+          "atMost": 1
+        },
+        {
+          "capability": "external_exec",
+          "reached": 1,
+          "notReached": 0,
+          "indeterminate": 2,
+          "overDeterminate": {
+            "successes": 1,
+            "n": 1,
+            "rate": 1,
+            "low": 0.2065432914738929,
+            "high": 1
+          },
+          "atLeast": 0.3333333333333333,
+          "atMost": 1
+        },
+        {
+          "capability": "dynamic_code",
+          "reached": 1,
+          "notReached": 0,
+          "indeterminate": 2,
+          "overDeterminate": {
+            "successes": 1,
+            "n": 1,
+            "rate": 1,
+            "low": 0.2065432914738929,
+            "high": 1
+          },
+          "atLeast": 0.3333333333333333,
+          "atMost": 1
+        }
+      ],
+      "refusedToAnalyse": 0,
+      "shipsOpaqueExecutable": 2,
+      "blindedAtEntry": 2,
+      "noEntryPoint": 0,
+      "reachesExternalDependency": 0,
+      "byCaptureReason": [
+        {
+          "reason": "quarantine-no-genome",
+          "members": 2
+        },
+        {
+          "reason": "watcher-threshold",
+          "members": 1
+        }
+      ],
+      "credentialEvidence": {
+        "secretPath": 0,
+        "tokenEnv": 0
+      }
+    },
+    "controls": {
+      "name": "controls, post-hoc credential_read",
+      "unit": "publisher-any",
+      "members": 49,
+      "measured": 49,
+      "failures": [],
+      "medianUnpackedSize": 8123,
+      "byCapability": [
+        {
+          "capability": "credential_read",
+          "reached": 3,
+          "notReached": 10,
+          "indeterminate": 36,
+          "overDeterminate": {
+            "successes": 3,
+            "n": 13,
+            "rate": 0.23076923076923078,
+            "low": 0.08179379092465713,
+            "high": 0.5025687399512693
+          },
+          "atLeast": 0.061224489795918366,
+          "atMost": 0.7959183673469388
+        },
+        {
+          "capability": "network_egress",
+          "reached": 10,
+          "notReached": 11,
+          "indeterminate": 28,
+          "overDeterminate": {
+            "successes": 10,
+            "n": 21,
+            "rate": 0.47619047619047616,
+            "low": 0.28343712296762946,
+            "high": 0.6763078209973324
+          },
+          "atLeast": 0.20408163265306123,
+          "atMost": 0.7755102040816326
+        },
+        {
+          "capability": "external_exec",
+          "reached": 13,
+          "notReached": 12,
+          "indeterminate": 24,
+          "overDeterminate": {
+            "successes": 13,
+            "n": 25,
+            "rate": 0.52,
+            "low": 0.334982179531473,
+            "high": 0.6996899607103998
+          },
+          "atLeast": 0.2653061224489796,
+          "atMost": 0.7551020408163265
+        },
+        {
+          "capability": "dynamic_code",
+          "reached": 5,
+          "notReached": 12,
+          "indeterminate": 32,
+          "overDeterminate": {
+            "successes": 5,
+            "n": 17,
+            "rate": 0.29411764705882354,
+            "low": 0.13279793865556402,
+            "high": 0.5313353332621391
+          },
+          "atLeast": 0.10204081632653061,
+          "atMost": 0.7551020408163265
+        }
+      ],
+      "refusedToAnalyse": 15,
+      "shipsOpaqueExecutable": 12,
+      "blindedAtEntry": 22,
+      "noEntryPoint": 0,
+      "reachesExternalDependency": 21,
+      "byCaptureReason": [
+        {
+          "reason": "quarantine-no-genome",
+          "members": 26
+        },
+        {
+          "reason": "watcher-threshold",
+          "members": 23
+        }
+      ],
+      "credentialEvidence": {
+        "secretPath": 1,
+        "tokenEnv": 2
+      }
+    },
+    "capabilities": [
+      {
+        "capability": "credential_read",
+        "unit": "publisher-any",
+        "difference": {
+          "a": {
+            "successes": 1,
+            "n": 1,
+            "rate": 1,
+            "low": 0.2065432914738929,
+            "high": 1
+          },
+          "b": {
+            "successes": 3,
+            "n": 13,
+            "rate": 0.23076923076923078,
+            "low": 0.08179379092465713,
+            "high": 0.5025687399512693
+          },
+          "difference": 0.7692307692307692,
+          "low": -0.06948761109523782,
+          "high": 0.9182062090753428,
+          "separated": false
+        },
+        "familyAdjusted": {
+          "a": {
+            "successes": 1,
+            "n": 1,
+            "rate": 1,
+            "low": 0.09861355789853093,
+            "high": 1
+          },
+          "b": {
+            "successes": 3,
+            "n": 13,
+            "rate": 0.23076923076923078,
+            "low": 0.04927599377735126,
+            "high": 0.6345626524817751
+          },
+          "difference": 0.7692307692307692,
+          "low": -0.21846687955790223,
+          "high": 0.9507240062226487,
+          "separated": false
+        },
+        "verdict": "INCONCLUSIVE at this n. +76.9pp, interval -21.8pp to +95.1pp, over 1 cases and 13 controls. Neither a difference nor the absence of one. The case side has 2 indeterminate, so the group is between 33.3% and 100.0% whatever this interval says."
+      },
+      {
+        "capability": "network_egress",
+        "unit": "publisher-any",
+        "difference": {
+          "a": {
+            "successes": 1,
+            "n": 1,
+            "rate": 1,
+            "low": 0.2065432914738929,
+            "high": 1
+          },
+          "b": {
+            "successes": 10,
+            "n": 21,
+            "rate": 0.47619047619047616,
+            "low": 0.28343712296762946,
+            "high": 0.6763078209973324
+          },
+          "difference": 0.5238095238095238,
+          "low": -0.2944939040200496,
+          "high": 0.7165628770323705,
+          "separated": false
+        },
+        "familyAdjusted": {
+          "a": {
+            "successes": 1,
+            "n": 1,
+            "rate": 1,
+            "low": 0.09861355789853093,
+            "high": 1
+          },
+          "b": {
+            "successes": 10,
+            "n": 21,
+            "rate": 0.47619047619047616,
+            "low": 0.20828106910697902,
+            "high": 0.7585410838335147
+          },
+          "difference": 0.5238095238095238,
+          "low": -0.42076412797245233,
+          "high": 0.791718930893021,
+          "separated": false
+        },
+        "verdict": "INCONCLUSIVE at this n. +52.4pp, interval -42.1pp to +79.2pp, over 1 cases and 21 controls. Neither a difference nor the absence of one. The case side has 2 indeterminate, so the group is between 33.3% and 100.0% whatever this interval says."
+      },
+      {
+        "capability": "external_exec",
+        "unit": "publisher-any",
+        "difference": {
+          "a": {
+            "successes": 1,
+            "n": 1,
+            "rate": 1,
+            "low": 0.2065432914738929,
+            "high": 1
+          },
+          "b": {
+            "successes": 13,
+            "n": 25,
+            "rate": 0.52,
+            "low": 0.334982179531473,
+            "high": 0.6996899607103998
+          },
+          "difference": 0.48,
+          "low": -0.33354903373133493,
+          "high": 0.665017820468527,
+          "separated": false
+        },
+        "familyAdjusted": {
+          "a": {
+            "successes": 1,
+            "n": 1,
+            "rate": 1,
+            "low": 0.09861355789853093,
+            "high": 1
+          },
+          "b": {
+            "successes": 13,
+            "n": 25,
+            "rate": 0.52,
+            "low": 0.2560818905338964,
+            "high": 0.7732087543770865
+          },
+          "difference": 0.48,
+          "low": -0.4562757026098353,
+          "high": 0.7439181094661036,
+          "separated": false
+        },
+        "verdict": "INCONCLUSIVE at this n. +48.0pp, interval -45.6pp to +74.4pp, over 1 cases and 25 controls. Neither a difference nor the absence of one. The case side has 2 indeterminate, so the group is between 33.3% and 100.0% whatever this interval says."
+      },
+      {
+        "capability": "dynamic_code",
+        "unit": "publisher-any",
+        "difference": {
+          "a": {
+            "successes": 1,
+            "n": 1,
+            "rate": 1,
+            "low": 0.2065432914738929,
+            "high": 1
+          },
+          "b": {
+            "successes": 5,
+            "n": 17,
+            "rate": 0.29411764705882354,
+            "low": 0.13279793865556402,
+            "high": 0.5313353332621391
+          },
+          "difference": 0.7058823529411764,
+          "low": -0.12227571104947166,
+          "high": 0.8672020613444359,
+          "separated": false
+        },
+        "familyAdjusted": {
+          "a": {
+            "successes": 1,
+            "n": 1,
+            "rate": 1,
+            "low": 0.09861355789853093,
+            "high": 1
+          },
+          "b": {
+            "successes": 5,
+            "n": 17,
+            "rate": 0.29411764705882354,
+            "low": 0.08722039456288527,
+            "high": 0.6449968555348442
+          },
+          "difference": 0.7058823529411764,
+          "low": -0.2613889311074631,
+          "high": 0.9127796054371147,
+          "separated": false
+        },
+        "verdict": "INCONCLUSIVE at this n. +70.6pp, interval -26.1pp to +91.3pp, over 1 cases and 17 controls. Neither a difference nor the absence of one. The case side has 2 indeterminate, so the group is between 33.3% and 100.0% whatever this interval says."
+      }
+    ]
+  },
+  "caveats": [
+    "The case side is 42 captures of 6 packages published by 3 npm accounts. Every interval here assumes independent draws and there are 3 independent events in it, so every one of them is narrower than the truth. The publisher-unit rows are the ones to read; the capture-unit rows are printed to show how much the unit changes the answer, not as a second measurement.",
+    "37 of the 42 case captures ship an executable no parser reads — a native binary, WASM, a V8 bytecode cache or unreadable minified code. For those, three of the four capabilities cannot be answered at all, and a two-valued analysis would have recorded them as reaching nothing: the malicious side looking cleaner than the control because it is better hidden.",
+    "The control is drawn through the SAME capture filter as the cases. Both capture reasons are enriched populations — 'quarantine-no-genome' keeps everything matching the three conjuncts of the observed class, 'watcher-threshold' keeps whatever scored high — so this compares the confirmed removals against the rest of what the filter kept, not against npm. A difference here does not transfer to the ecosystem without measuring the filter's own selection, which this run does not do.",
+    "\"Not withdrawn\" is as good as the removal record. It unions five records — npm's 0.0.1-security placeholder in the takedown log, the sweep's own list, the deletions the change feed reported, the unpublish times in the TTR log, and every capture this project has labelled — and a package npm removes tomorrow is still in the control today. That error runs against the difference: it puts malicious packages in the control group, so a difference that survives it is not created by it.",
+    "Indeterminate is not evenly distributed: 37 of 42 cases (88%) and 29 of 87 controls (33%) could not be read at all. That is two different failures counted together, because they have the same consequence: 37 cases and 15 controls ship something no parser reads, and 0 cases and 20 controls were never opened (no JavaScript in the archive, or past the size bound). Where the two sides are blinded at different rates, the rate over the determinate members is comparing two different subsets and the bounds are the honest reading.",
+    "Reachability is package-local. A package that reaches a declared dependency hands control to code that is not in this tarball and was not analysed; `externalModules` counts those packages so the bound can be read.",
+    "Three of the four capabilities are answered by which module is reached, which is what the code CAN do and never what it does. A package that requires child_process and never calls it is reported as reaching external_exec, correctly.",
+    "credential_read is the exception and needs an argument, so its negative is the weakest of the four: it says no path naming a secret was demonstrated, over the call sites whose arguments could be read.",
+    "dynamic_code is reached by the same facts that blind the other three. It is closer to \"this package hides what it does\" than to a capability in its own right, and a run where it is the only thing that fires is a run that measured opacity.",
+    "Nothing here scores. A capability is not a verdict, the four are not weighted, and no number in this module contributes a point to anything."
+  ]
+}

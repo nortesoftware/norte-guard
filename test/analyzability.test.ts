@@ -17,6 +17,11 @@ import { describe, it, expect } from 'vitest'
 import { rateWithCI } from '../src/stats.js'
 import { gzipSync } from 'node:zlib'
 
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createHash } from 'node:crypto'
+import { NgpackSource } from '../src/ngpack.js'
 import { readTar, gunzipIfNeeded, DEFAULT_TAR_LIMITS } from '../src/tarball.js'
 import { classifyFile, extensionOf, isExecutableKind, isTypeDeclaration } from '../src/file-kind.js'
 import {
@@ -30,10 +35,12 @@ import {
   packageTypeOf,
   walkAst,
   MAX_PARSE_BYTES,
+  MINIFIED_THRESHOLD,
+  type CaptureAnalyzability,
   type FileAnalysis,
   type LegibilityThreshold,
 } from '../src/analyzability.js'
-import { stratifiedSample, selfLabelledMinified, checkThreshold, analyzeCapture, canonicalModule, type MetricRow } from '../src/analyzability-run.js'
+import { stratifiedSample, selfLabelledMinified, checkThreshold, analyzeCapture, canonicalModule, summariseCorpus, type MetricRow } from '../src/analyzability-run.js'
 import type { CorpusSample } from '../src/corpus.js'
 
 // ---------------------------------------------------------------------------
@@ -733,6 +740,125 @@ describe('the corpus pass', () => {
  * The two findings the first real run produced, pinned so a refactor cannot
  * quietly undo either.
  */
+describe('finding the object store', () => {
+  // manifest.objectStore is the path the watcher was given, relative to
+  // wherever it was running. corpus.ts resolves the store against the capture's
+  // own parent instead, and for a while the two disagreed: tarballPresent
+  // counted eleven captures with bytes while the reader reported all eleven as
+  // "bytes are no longer in the object store". A denominator built on one and a
+  // measurement built on the other describe different corpora.
+  it('reads the store beside the capture even when the recorded path does not resolve', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ng-store-'))
+    const captures = join(root, 'captures')
+    const dir = join(captures, 'p@1.0.0_1')
+    mkdirSync(dir, { recursive: true })
+
+    const tarball = gzipSync(Buffer.concat([
+      tarFile('package/package.json', '{"name":"p","version":"1.0.0"}'),
+      tarFile('package/index.js', 'module.exports = 1\n'),
+      TAR_END,
+    ]))
+    const hash = createHash('sha256').update(tarball).digest('hex')
+    mkdirSync(join(captures, 'objects', hash.slice(0, 2)), { recursive: true })
+    writeFileSync(join(captures, 'objects', hash.slice(0, 2), hash), tarball)
+
+    const packument = JSON.stringify({ name: 'p', versions: {}, time: {} })
+    writeFileSync(join(dir, 'packument.json'), packument)
+    writeFileSync(join(dir, 'manifest.json'), JSON.stringify({
+      version: 1, package: 'p', capturedAt: '2026-08-17T00:00:00Z',
+      capturedFrom: 'https://registry.npmjs.org',
+      versionsIncluded: ['1.0.0'],
+      hashes: { 'packument.json': createHash('sha256').update(Buffer.from(packument)).digest('hex') },
+      objects: { '1.0.0': hash },
+      // The path as some other working directory saw it. It does not exist here.
+      objectStore: './somewhere-else/captures',
+    }))
+
+    const source = new NgpackSource(dir)
+    expect(source.missingTarballs).toEqual([])
+    expect(source.tarballSync('1.0.0')?.length).toBe(tarball.length)
+  })
+
+  it('still reports bytes that are genuinely gone as missing', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ng-store-gone-'))
+    const dir = join(root, 'captures', 'p@1.0.0_1')
+    mkdirSync(dir, { recursive: true })
+
+    const packument = JSON.stringify({ name: 'p', versions: {}, time: {} })
+    writeFileSync(join(dir, 'packument.json'), packument)
+    writeFileSync(join(dir, 'manifest.json'), JSON.stringify({
+      version: 1, package: 'p', capturedAt: '2026-08-17T00:00:00Z',
+      capturedFrom: 'https://registry.npmjs.org',
+      versionsIncluded: ['1.0.0'],
+      hashes: { 'packument.json': createHash('sha256').update(Buffer.from(packument)).digest('hex') },
+      objects: { '1.0.0': 'a'.repeat(64) },
+      objectStore: './captures',
+    }))
+
+    expect(new NgpackSource(dir).missingTarballs).toEqual(['1.0.0'])
+  })
+})
+
+describe('a tarball refused for size stays in the denominator', () => {
+  // The cap on the score path keeps the packument and declines the bytes. That
+  // is a knowable exclusion, and the whole point of recording it is that the
+  // headline rate can still be stated over the complete population — otherwise
+  // the cap improves the number by removing its own worst cases.
+  const capture = (over: Partial<CaptureAnalyzability>): CaptureAnalyzability => ({
+    package: 'p', version: '1.0.0', capturedAt: '2026-08-17T00:00:00Z',
+    ngpackPath: '/x', label: 'unconfirmed',
+    executableBytes: 100, executableFiles: 1, coveredBytes: 100, coveredFiles: 1,
+    coverage: 1, byReason: {}, heldOut: {}, files: [],
+    ...over,
+  })
+
+  const results = [
+    capture({ package: 'legible' }),
+    capture({ package: 'legible-2' }),
+    capture({ package: 'opaca', coverage: 0, coveredBytes: 0, coveredFiles: 0,
+              byReason: { 'native-binary': { files: 1, bytes: 100 } } }),
+  ]
+
+  it('reports the rate over what was looked at, and the bound over everything', () => {
+    const summary = summariseCorpus(results, {
+      threshold: MINIFIED_THRESHOLD, engineVersion: 'test', ranAt: '',
+      confirmedPackages: new Set<string>(), refusedForSize: 7,
+    })
+
+    // 1 of 3 among the captures with bytes.
+    expect(summary.shipsOpaqueExecutable.rate).toBeCloseTo(1 / 3, 10)
+
+    // 1 of 10 if none of the refused ships one, 8 of 10 if all of them do.
+    expect(summary.refusedForSize).toBe(7)
+    expect(summary.shipsOpaqueExecutableComplete.denominator).toBe(10)
+    expect(summary.shipsOpaqueExecutableComplete.low).toBeCloseTo(0.1, 10)
+    expect(summary.shipsOpaqueExecutableComplete.high).toBeCloseTo(0.8, 10)
+  })
+
+  it('leaves the bound equal to the rate when nothing was refused', () => {
+    const summary = summariseCorpus(results, {
+      threshold: MINIFIED_THRESHOLD, engineVersion: 'test', ranAt: '',
+      confirmedPackages: new Set<string>(),
+    })
+
+    expect(summary.refusedForSize).toBe(0)
+    expect(summary.shipsOpaqueExecutableComplete.low).toBeCloseTo(1 / 3, 10)
+    expect(summary.shipsOpaqueExecutableComplete.high).toBeCloseTo(1 / 3, 10)
+  })
+
+  it('cannot be gamed by a cap that refuses everything', () => {
+    // The failure this exists to prevent: refuse every large package and the
+    // measured rate is over whatever is left. The bound refuses to narrow.
+    const summary = summariseCorpus([capture({ package: 'la-unica' })], {
+      threshold: MINIFIED_THRESHOLD, engineVersion: 'test', ranAt: '',
+      confirmedPackages: new Set<string>(), refusedForSize: 99,
+    })
+
+    expect(summary.shipsOpaqueExecutable.rate).toBe(0)
+    expect(summary.shipsOpaqueExecutableComplete.high).toBeCloseTo(0.99, 10)
+  })
+})
+
 describe('what the first run found', () => {
   // package/dist/internal/calc.dat in kit-hydration-vim@1.0.0 — a capture npm
   // removed and this project labelled confirmed_malicious — is 63,616 bytes
