@@ -4,7 +4,7 @@
 // analysable after npm purged it, keeps the benchmark reproducible years later,
 // and lets tests run offline and deterministically.
 
-import { createReadStream, createWriteStream, mkdirSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createReadStream, createWriteStream, mkdirSync, existsSync, readdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import type { CapturedFacts, PackageSource, SourceInfo } from './source.js'
@@ -121,8 +121,20 @@ export async function createNgpack(
     }
   }
 
-  writeFileSync(join(outputPath, 'manifest.json'), JSON.stringify(manifest, null, 2))
-  writeFileSync(join(outputPath, 'packument.json'), packumentRaw)
+  // The manifest is written LAST and atomically, and both halves of that matter.
+  //
+  // Last, because it is the index: every object is already in the store by the
+  // time anything claims it is, so a crash in the middle leaves unreferenced
+  // bytes — which the sweep collects — and never a reference to bytes that were
+  // never written, which nothing can repair. That ordering was already correct
+  // and this comment is here so a later edit does not quietly reverse it.
+  //
+  // Atomically, because a plain writeFileSync is not: a crash partway through
+  // leaves a truncated JSON that every reader skips, and a capture whose manifest
+  // does not parse is a capture whose objects look unreferenced to the sweep.
+  // That is the same store-eating failure by a different door.
+  writeJsonAtomic(join(outputPath, 'manifest.json'), JSON.stringify(manifest, null, 2))
+  writeJsonAtomic(join(outputPath, 'packument.json'), packumentRaw)
 
   console.error(`\n.ngpack saved to ${outputPath}`)
   return { manifest, packument, tarballs }
@@ -550,5 +562,20 @@ function bootstrapMetadata(ngpackDir: string): CaptureMetadata {
     label: 'unconfirmed',
     notes: 'metadata reconstructed from manifest.json: the capture score was never recorded',
     doNotExtract: true,
+  }
+}
+
+// Write-then-rename. rename(2) is atomic within a filesystem, so a reader sees
+// either the previous content or the whole new content and never a prefix of it.
+export function writeJsonAtomic(path: string, contents: string): void {
+  const temp = `${path}.tmp`
+  try {
+    writeFileSync(temp, contents)
+    renameSync(temp, path)
+  } catch (e) {
+    // A failed rename must not leave the temp file behind to be mistaken for a
+    // capture artifact by anything that lists the directory.
+    try { if (existsSync(temp)) unlinkSync(temp) } catch { /* nothing further to do */ }
+    throw e
   }
 }

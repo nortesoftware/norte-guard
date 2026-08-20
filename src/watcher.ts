@@ -41,6 +41,9 @@ import {
   DEFAULT_QUARANTINE,
   DEFAULT_MAX_CAPTURE_BYTES,
   QUARANTINE_REASON,
+  auditObjectIntegrity,
+  readIntegrityState,
+  writeIntegrityState,
   type QuarantinePolicy,
 } from './capture-budget.js'
 import { engineVersion } from './fp-bench-store.js'
@@ -775,7 +778,7 @@ export async function startWatcher(config: WatcherConfig): Promise<void> {
   )
   console.log(
     quarantinePolicy.enabled
-      ? `Quarantine: no-genome - name under ${YOUNG_NAME_DAYS} days - ` +
+      ? `Quarantine: name under ${YOUNG_NAME_DAYS} days - ` +
         `under ${TINY_PACKAGE_BYTES / 1000}KB - no repository, retained ` +
         `${quarantinePolicy.retentionDays} days`
       : 'Quarantine: disabled'
@@ -789,6 +792,42 @@ export async function startWatcher(config: WatcherConfig): Promise<void> {
     `Score path: no tarball above ${formatBytes(unpackedCap)} unpacked — the packument is ` +
     `captured anyway and the refusal recorded, so the package stays in every denominator`
   )
+
+  // Object store integrity, printed beside the budget and for the same reason:
+  // a number nobody prints is a number nobody checks. 3,190 tarballs went
+  // missing from this store and it was found weeks later by going to look. The
+  // total is a scar and stays constant; the delta is the line worth reading.
+  {
+    const capturesDir = join(config.outputDir, 'captures')
+    const previous = readIntegrityState(config.outputDir)
+    const integrity = auditObjectIntegrity(capturesDir, capturesDir, previous)
+    if (integrity.references > 0) {
+      const window = integrity.oldestMissing && integrity.newestMissing
+        ? `, ${integrity.oldestMissing.slice(0, 10)}..${integrity.newestMissing.slice(0, 10)}`
+        : ''
+      const delta = integrity.newSinceLastCheck === null
+        ? ' (first check, no baseline)'
+        : integrity.newSinceLastCheck > 0
+          ? `  <-- ${integrity.newSinceLastCheck} NEW SINCE LAST START`
+          : ' (no change since last start)'
+      console.log(
+        `Object store: ${integrity.references - integrity.missing}/${integrity.references} tarballs present` +
+        (integrity.missing > 0
+          ? `, ${integrity.missing} MISSING${window}` +
+            (integrity.missingLabelled > 0 ? ` — ${integrity.missingLabelled} of them labelled` : '') +
+            delta
+          : '')
+      )
+      if (integrity.newSinceLastCheck !== null && integrity.newSinceLastCheck > 0) {
+        console.log(
+          `  Bytes that were fetched and hashed are gone. These packages are removed from npm ` +
+          `within hours, so they cannot be re-fetched at any price. Find what deleted them ` +
+          `before capturing more.`
+        )
+      }
+      writeIntegrityState(config.outputDir, integrity, new Date().toISOString())
+    }
+  }
 
   const rotatedLogs = rotateLogs(config.outputDir)
   if (rotatedLogs.rotated.length > 0) {
