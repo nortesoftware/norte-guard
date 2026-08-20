@@ -337,3 +337,243 @@ confound testable instead of undecidable.
   a confirmed sample nobody has opened tests it.
 - Both arms still pass through the same enriched capture filter, so this compares
   confirmed removals against the rest of what the filter kept — not against npm.
+
+---
+
+## What is publishable, and what the power table is for
+
+The finding is **descriptive, and it is about opacity**. A count of what the
+artifacts contain needs no power calculation — but it does still need a unit, and
+"37 of 42 captures" is the capture unit, which is the one this whole audit was
+about. The honest statement gives all three:
+
+| unit | cases | controls |
+|---|---|---|
+| capture | **37 / 42 = 88.1%** | 15 / 87 = 17.2% |
+| package | 2 / 6 = 33.3% | 12 / 60 = 20.0% |
+| publisher | 2 / 3 = 66.7% | 12 / 49 = 24.5% |
+
+The 37 opaque captures are **two packages**: `@siwatfa/yorn`, which is bytecode
+and minified and was captured 36 times, and `kit-hydration-vim`, a native binary
+captured once. So the 88% is one operator's republication rate wearing the shape
+of a prevalence, exactly as `dynamic_code` was — and stating it as "37 of 42,
+n=42" would repeat the error this document exists to correct.
+
+What survives at every unit is the direction, and that is the publishable claim:
+
+> Of the six packages npm removed and this collector caught before the removal,
+> **two ship an executable no parser reads** — a V8 bytecode cache with minified
+> code, and a native binary. Those two are two of the three operators. In
+> size-matched packages npm did not remove, the figure is 12 of 60 packages. The
+> counts are small and are given as counts; no interval is claimed.
+
+That is weaker than "88% versus 17%" and it is the one that is true. The strong
+version is available only at the unit where one package is counted 36 times.
+
+**The per-capability claim is the one that is not available**, and the power
+table is what says so rather than an apology for it:
+
+| case determinate share | 100% | 75% | 50% | 33% | 25% |
+|---|---|---|---|---|---|
+| `credential_read` (ctrl 23%) | 24 | 30 | 40 | 55 | 72 |
+| `network_egress` (ctrl 48%) | 28 | 38 | 55 | 74 | 96 |
+| `external_exec` (ctrl 48%) | 28 | 34 | 50 | 76 | 100 |
+| `dynamic_code` (ctrl 28%) | 26 | 32 | 40 | 61 | 80 |
+
+Publishers needed for a +30pp difference to separate at the family-adjusted z,
+by how often a case yields a determinate answer. Today there are **3**, and the
+determinate share is 1/3 for `external_exec` and `dynamic_code` and 0/3 for the
+other two.
+
+The temptation is to read that table as a schedule — wait for 61 publishers and
+the answer arrives. It is not. Every column but the first assumes the case side
+stays partly unreadable, and **the unreadability is the phenomenon**. A cohort
+that became legible enough to fill the 100% column would be a cohort of
+attackers who had stopped hiding. Waiting for the case arm to become analysable
+is waiting for the thing being studied to stop happening.
+
+So the table earns its place by justifying a refusal: at n=3 publishers, with two
+of four capabilities returning no determinate case at all, no per-capability
+difference is claimable, and no amount of patience at the current arrival rate
+changes that within the horizon the corpus covers. The opacity count does not
+have that problem, and it is the stronger result anyway.
+
+---
+
+## The object store: 3,190 tarballs deleted while still referenced
+
+Found while asking why two of the five publishers with a genuine pre-removal
+capture cannot enter A5. Audited across the whole corpus, at a snapshot of
+22,836 captures and 17,447 stored objects.
+
+**Were the bytes ever downloaded?** Yes, provably. The manifest records a
+64-hex sha256 per version, written at `ngpack.ts:104` as
+`manifest.objects[ver] = stored.sha256` — the return value of
+`putObject(buf)`, which hashes the buffer. npm's packument carries `dist.shasum`
+(sha1) and `dist.integrity` (sha512) and **no 64-hex string anywhere**, so the
+recorded hash cannot have been copied from metadata. Confirmed on a survivor:
+for `bcs-core@1.0.0` the stored object is a gzip tarball whose sha256 equals the
+manifest hash and whose sha1 equals npm's `dist.shasum`. The bytes were fetched,
+hashed and written. They were deleted afterwards.
+
+**Three axes, as the shape of the answer:**
+
+| cut | result |
+|---|---|
+| by engine / date | **step function** — 0.3.2: 95.7%, 1.0.0: 95.2%, and **0.0% for 1.1.0, 1.2.0, 1.2.1, 1.3.0, 1.4.0** across 17,588 references |
+| by size | **flat** — 96.1% under 10KB, 95.7% at 10-100KB, 93.4% at 1-10MB, 93.4% at 10-32MB, 97.9% at ≥32MB. No cliff at the 32MB `--max-capture-mb` bound |
+| by position within a run | **flat** — 15.3%, 15.0%, 15.1%, 15.2%, 15.1%, 15.1%, 15.5%, 15.4%, 15.5%, 14.7% by decile. No end-of-run concentration |
+
+Not dispersed across all three, so not a non-transactional write. One historical
+episode, bounded in time.
+
+**The mechanism, and why retention is a red herring.** `collectOrphanObjects` is
+mark-and-sweep: an object survives if a capture on disk names its hash. It never
+reads `retainUntil`. All 3,190 deleted objects **are still named by manifests on
+disk** — that is how this audit found them — so the sweep deleted *referenced*
+objects, which it can only do if its scan of the captures directory came back
+empty or nearly so. Manifests record `objectStore` as a cwd-relative path
+(`norte-guard-captures/captures`), and resolving it against the wrong working
+directory produces exactly that. Corroborating: of the 1,611 orphans that carry
+a `retainUntil`, **1,611 have a `retainUntil` still in the future** — none
+expired. Nothing aged out; a scan failed.
+
+**Is it still active?** No, and the reasoning has to be careful, because the
+obvious check does not work: of the 3,543 present objects carrying a
+`retainUntil`, **zero have reached it**, so "no orphans since 1.1.0" cannot by
+itself distinguish "fixed" from "not yet due". What resolves it is that this
+failure mode is age-independent — a failed scan deletes referenced objects
+whatever their retention date — so 17,588 references surviving over five days of
+continuous collection is evidence, not an artifact of youth. A live dry run of
+the current sweep against the store confirms it: **0 objects it would delete, 0
+bytes, no refusal.**
+
+Two defences now stand: the store root no longer follows `manifest.objectStore`
+(v1.1.0), and `ORPHAN_SWEEP_MAX_SHARE = 0.5` refuses any sweep that finds more
+than half the store unreferenced (v1.2.1, commit `69bca94`). The second is a
+blast-radius bound, not a proof: a *partial* scan failure yielding under 50%
+apparent orphans would still delete. A sweep that verified its own scan — refuse
+if the referenced set is empty, or if it fell sharply since the last run —
+would close that, and is not written.
+
+**The cost, in evidence.** **31 confirmed_malicious captures** lost their bytes,
+not six. Six are the pre-removal observations that cost A5 two publishers —
+`async-critical-section`, `keyed-mutex-map`, `resource-lease-pool`,
+`single-flight-lock`, `try-lock-runner` (all `javonayers999`) and `bcs-mini`
+(`graypin`). Five more are the `fabricated_family` tombstones. **The other twenty
+are early versions of `@siwatfa/yorn`** — 1.0.1 through 1.0.30 — which is why that
+package has 56 captures and only 36 with bytes. The case arm did not just lose
+two publishers to this sweep; it lost more than a third of the republication
+series of the one package it does have.
+
+That is **two of the five publishers** with a genuine pre-removal capture, and it
+is why A5's case arm is 3 publishers rather than 5 — a sweep, not a shortage of
+attacks.
+
+**The leak is now reported rather than discovered.** `auditObjectIntegrity` walks
+the manifests against the store and the watcher prints the result on the startup
+line beside the budget, because the only reason this was ever found is that
+somebody went looking, and an object store leaks silently by construction —
+nothing reads a tarball until a question is asked of it weeks later. The total is
+a scar and stays constant, so what the line emphasises is the delta against the
+previous start:
+
+```
+Object store: 18647/21837 tarballs present, 3190 MISSING, 2026-08-12..2026-08-14
+              — 31 of them labelled (no change since last start)
+```
+
+and, when it moves:
+
+```
+              — 31 of them labelled  <-- 10 NEW SINCE LAST START
+  Bytes that were fetched and hashed are gone. These packages are removed from
+  npm within hours, so they cannot be re-fetched at any price. Find what deleted
+  them before capturing more.
+```
+
+The check costs 829 ms over 21,837 references.
+
+**Write ordering was already correct**, and is now commented so an edit does not
+reverse it: `createNgpack` writes every object to the store first and the manifest
+last, so a crash mid-capture leaves unreferenced bytes — which the sweep collects
+— and never a reference to bytes that were never written, which nothing can
+repair. What was missing is that the manifest write was not atomic: a plain
+`writeFileSync` truncated by a crash leaves JSON no reader can parse, and a
+capture whose manifest does not parse is a capture whose objects look
+unreferenced to the sweep — the same store-eating failure through a different
+door. `writeJsonAtomic` now writes to a temp file and renames.
+
+---
+
+## Recovery of the six lost tarballs: none, and what survives instead
+
+Attempted against registry.npmjs.org, skimdb, unpkg, jsDelivr (six edges plus
+statically.io), Software Heritage, the Wayback Machine, npmmirror, yarnpkg,
+Tencent, Huawei, deps.dev and npm's attestations endpoint. **Zero of six
+recovered as bytes**, zero as file trees.
+
+Every source returns the same thing: the registry serves the `0.0.1-security`
+placeholder and 404s the tarball; skimdb has no stale replication document; every
+CDN resolves against live npm and so has nothing; the Wayback Machine has no
+captures. Software Heritage is the instructive one — it holds an npm origin for
+all six, but **every visit postdates the takedown**. The packages were removed
+roughly seven hours after publication (five of the six by `javonayers999` inside
+a five-minute window on 2026-08-13, `bcs-mini` by `graypin` the next day), and
+SWH's crawler arrived about thirty minutes late. Seven hours is not long enough
+to get mirrored.
+
+**Two of the six left per-file metadata behind, and it authenticates.** jsDelivr's
+data API still answers for them, and the file list sums exactly to the
+`unpackedSize` and `fileCount` in the packument this project captured before the
+removal — an independent match on two fields, so the record is genuine:
+
+`single-flight-lock@1.0.0` — 5 files, 3,578 B (packument: 3,578 / 5)
+
+| file | bytes | sha256 (base64) |
+|---|---|---|
+| `/index.js` | 1277 | `Cj7muW/R6IHavcCgTr0AjNFnnTenRrbsxE82WiZpZaQ=` |
+| `/index.d.ts` | 192 | `nH86sOBDIuzOZZJFy80Mhp0TfsK9UDKoLe5JZ8HJ4lk=` |
+| `/LICENSE` | 1060 | `F5xyKRWJ6s19SE15pFyJjwcYL+KuYjA5kM41dbM2JV4=` |
+| `/package.json` | 519 | `mrhB60oxTh9kJXLEfTb/mZIO/kUK5Pa5gTSif2ked1Y=` |
+| `/README.md` | 530 | `Mao1rBZedPvLEWXbWuVZed+zaMiF/3E6wdU04MllYcI=` |
+
+`bcs-mini@1.0.1` — 3 files, 4,607 B (packument: 4,607 / 3)
+
+| file | bytes | sha256 (base64) |
+|---|---|---|
+| `/index.js` | 3877 | `uWXQT6fUBJJQL761Ny7juvHDOMsOF/xbmHaPYflmt0Q=` |
+| `/package.json` | 391 | `Nf+NHVU5tjx+mWAg/56vsM5eSAP2+8Bb/DSaVrl7SWo=` |
+| `/README.md` | 339 | `6d+2jbH/QUQfHKlmH466/fuX6otOGCVezLeKUWp7Azc=` |
+
+Transcribed here because jsDelivr will purge it eventually and this file is
+version-controlled. If the bytes ever surface, they can be verified file by file.
+
+One thing this metadata already settles without the bytes: **neither package is
+opaque.** No `.node`, no `.wasm`, no bytecode — five and three plain source files
+respectively. Whatever those two did, they did it in readable JavaScript, so
+their absence from the case arm does not bias the opacity count in either
+direction.
+
+The full sha256 the project recorded for each lost tarball, kept so a future
+match is checkable:
+
+```
+async-critical-section@1.0.0  01d51cf18526bbc4c5512fc8f1c34aa465b992b36cb95021674028aca0c933e1
+keyed-mutex-map@2.1.2         9086d5deff052c06a8761ddca1958c435acceab0885dc8c0dc545cbcbbe9e663
+resource-lease-pool@1.4.2     939525ec2c034dae185d1767190fc3a45807aa5e513afb72563efffe7cd4be18
+single-flight-lock@1.0.0      62d7f2aa8bc88eae20a21cd6f7aad6a2e23c1c5c7b03d0254820f009156a1bdd
+try-lock-runner@3.2.1         28d5ca79bc3cd7770e8f665d3ac31fbb23c4c408d092ae4ab228e7930d102c75
+bcs-mini@1.0.1                848a514a14a54fc5fff9c4312c9580870a2a19073e5eef114c0e7519d0cf64dd
+```
+
+A later attempt at `bcs-mini@1.0.1` through unpkg was checked directly and
+returns 404 on all three URL forms (`/-/bcs-mini-1.0.1.tgz`, the package root,
+and `/browse/`), as do the other five. Nothing was recovered from any source; the
+case arm stays at 3 publishers.
+
+Public retrieval is exhausted. What remains is a party that resolved these during
+the seven-hour live window — an upstream proxy or CI cache (Verdaccio,
+Artifactory, Nexus, a GitHub Actions npm cache) on whatever host ran the original
+collector, or npm security, who hold the samples they removed. Neither is
+retrieval work.

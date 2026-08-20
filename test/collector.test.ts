@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os'
 
 import { classifyGhostReversion, compareVersions } from '../src/genome.js'
 import { platformFamily, PlatformFamilyTracker } from '../src/platform-family.js'
-import { DailyCaptureBudget, rotateCaptures, directorySize, formatBytes, sweepQuarantine, QUARANTINE_REASON, consolidateDeltas, collectOrphanObjects, extendQuarantineRetention, DEFAULT_MAX_CAPTURE_BYTES } from '../src/capture-budget.js'
+import { DailyCaptureBudget, rotateCaptures, directorySize, formatBytes, sweepQuarantine, QUARANTINE_REASON, consolidateDeltas, collectOrphanObjects, extendQuarantineRetention, DEFAULT_MAX_CAPTURE_BYTES, auditObjectIntegrity, readIntegrityState, writeIntegrityState } from '../src/capture-budget.js'
 import { readObservations } from '../src/takedown-sweep.js'
 import { classifyFetchFailure, budgetFor } from '../src/watcher.js'
 import { describeComposition, compositionFromNotes } from '../src/corpus.js'
@@ -24,6 +24,7 @@ import { classifyPublication, TINY_PACKAGE_BYTES } from '../src/observed-class.j
 import { absoluteRiskSignals, impliedHistory } from '../src/absolute-risk.js'
 import { putObject, getObject, objectPath } from '../src/object-store.js'
 import { rotateLogs } from '../src/log-rotation.js'
+import { writeJsonAtomic } from '../src/ngpack.js'
 import { createApprovalRecord, createOverrideApproval } from '../src/approvals.js'
 import {
   assessPromotion, scheduledReview, ruleEvidenceFor, verdictsFromCaptures,
@@ -1785,5 +1786,104 @@ describe('precision of the capture filter', () => {
     expect(p.observedAlive).toBe(1)
     expect(p.observedAliveWithUsage).toBe(1)
     expect(p.caveats.join(' ')).toContain('must not be scaled up')
+  })
+})
+
+describe('auditObjectIntegrity — the leak that went unreported for weeks', () => {
+  const capture = (root: string, name: string, hash: string, over: Record<string, unknown> = {}) => {
+    const dir = join(root, `${name}@1.0.0_1`)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'manifest.json'), JSON.stringify({
+      version: 1, package: name, capturedAt: '2026-08-13T09:27:00Z',
+      capturedFrom: 'https://registry.npmjs.org',
+      versionsIncluded: ['1.0.0'], hashes: {},
+      objectStore: root, objects: { '1.0.0': hash },
+    }))
+    writeFileSync(join(dir, 'capture-metadata.json'), JSON.stringify({
+      package: name, version: '1.0.0', capturedAt: '2026-08-13T09:27:00Z', ...over,
+    }))
+    return dir
+  }
+
+  it('counts the manifests whose bytes were read and whose object is gone', () => {
+    const root = tempDir('ng-int-')
+    const kept = putObject(root, Buffer.alloc(1000, 1))
+    capture(root, 'present', kept.sha256)
+    // A hash no object was ever written for: the shape of a swept store.
+    capture(root, 'swept', 'a'.repeat(64))
+
+    const r = auditObjectIntegrity(root, root)
+    expect(r.references).toBe(2)
+    expect(r.missing).toBe(1)
+    expect(r.oldestMissing).toBe('2026-08-13T09:27:00Z')
+  })
+
+  it('counts labelled losses apart — a confirmed sample with no bytes cannot be re-analysed', () => {
+    const root = tempDir('ng-int-lab-')
+    capture(root, 'labelled', 'b'.repeat(64), { label: 'confirmed_malicious' })
+    capture(root, 'plain', 'c'.repeat(64), { label: 'unconfirmed' })
+
+    const r = auditObjectIntegrity(root, root)
+    expect(r.missing).toBe(2)
+    expect(r.missingLabelled).toBe(1)
+  })
+
+  it('reports the delta against the last run, because the total is a scar', () => {
+    const root = tempDir('ng-int-delta-')
+    capture(root, 'gone-a', 'd'.repeat(64))
+    capture(root, 'gone-b', 'e'.repeat(64))
+
+    // No baseline yet: a first check cannot claim anything is new.
+    expect(auditObjectIntegrity(root, root).newSinceLastCheck).toBeNull()
+    // A run that finds the same scar is quiet; one that finds more is not.
+    expect(auditObjectIntegrity(root, root, 2).newSinceLastCheck).toBe(0)
+    expect(auditObjectIntegrity(root, root, 1).newSinceLastCheck).toBe(1)
+  })
+
+  it('a healthy store reports every reference present and nothing missing', () => {
+    const root = tempDir('ng-int-ok-')
+    const a = putObject(root, Buffer.alloc(100, 7))
+    const b = putObject(root, Buffer.alloc(200, 8))
+    capture(root, 'a', a.sha256)
+    capture(root, 'b', b.sha256)
+
+    const r = auditObjectIntegrity(root, root)
+    expect(r.references).toBe(2)
+    expect(r.missing).toBe(0)
+    expect(r.missingLabelled).toBe(0)
+    expect(r.oldestMissing).toBeNull()
+  })
+
+  it('round-trips its state so consecutive starts can be compared', () => {
+    const root = tempDir('ng-int-state-')
+    expect(readIntegrityState(root)).toBeNull()
+    writeIntegrityState(root, {
+      references: 10, missing: 3, missingLabelled: 1,
+      oldestMissing: null, newestMissing: null, newSinceLastCheck: null,
+    }, '2026-08-19T00:00:00Z')
+    expect(readIntegrityState(root)).toBe(3)
+  })
+})
+
+describe('writeJsonAtomic — a truncated manifest is an unreferenced store', () => {
+  it('leaves no temp file behind and writes the whole content', () => {
+    const root = tempDir('ng-atomic-')
+    const target = join(root, 'manifest.json')
+    writeJsonAtomic(target, JSON.stringify({ version: 1, package: 'x' }))
+
+    expect(JSON.parse(readFileSync(target, 'utf-8')).package).toBe('x')
+    expect(existsSync(`${target}.tmp`)).toBe(false)
+  })
+
+  it('replaces an existing file wholesale rather than in place', () => {
+    const root = tempDir('ng-atomic-2-')
+    const target = join(root, 'manifest.json')
+    writeJsonAtomic(target, JSON.stringify({ a: 'a'.repeat(500) }))
+    writeJsonAtomic(target, JSON.stringify({ b: 1 }))
+
+    const after = JSON.parse(readFileSync(target, 'utf-8'))
+    expect(after.b).toBe(1)
+    expect(after.a).toBeUndefined()
+    expect(existsSync(`${target}.tmp`)).toBe(false)
   })
 })

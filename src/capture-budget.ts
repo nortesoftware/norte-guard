@@ -368,6 +368,109 @@ export interface ObjectCollection {
 export const ORPHAN_SWEEP_MAX_SHARE = 0.5
 
 
+export const INTEGRITY_STATE = 'object-integrity.json'
+
+export interface ObjectIntegrity {
+  // Tarballs a manifest says are in the store.
+  references: number
+  // ...that are not. Every one of these is a capture whose bytes were fetched
+  // and hashed — the sha256 in a manifest is the return of putObject and cannot
+  // come from the packument, which carries only sha1 and sha512 — and are now
+  // gone. They are unrecoverable: npm removes these packages within hours.
+  missing: number
+  // Missing entries that carry a label. These are the expensive ones: a labelled
+  // capture with no bytes is a confirmed sample that can never be analysed.
+  missingLabelled: number
+  // Earliest and latest capture date among the missing, so one historical
+  // incident can be told from a leak that is still running.
+  oldestMissing: string | null
+  newestMissing: string | null
+  // How many more are missing than the last time this ran. This is the number
+  // worth waking up for; the total is a scar and stays constant.
+  newSinceLastCheck: number | null
+}
+
+// Counts the manifests whose bytes were read and whose object is gone.
+//
+// This exists because 3,190 of them accumulated without anything saying so. They
+// were found by going to look, which is not a control: an object store leaks
+// silently by construction, since nothing reads a tarball until somebody asks a
+// question of it weeks later. The sweep already walks both sides — it builds the
+// referenced set to decide what to delete — so the same walk, run the other way
+// round, is free.
+export function auditObjectIntegrity(
+  capturesDir: string,
+  storeRoot = capturesDir,
+  previous?: number | null
+): ObjectIntegrity {
+  const empty: ObjectIntegrity = {
+    references: 0, missing: 0, missingLabelled: 0,
+    oldestMissing: null, newestMissing: null, newSinceLastCheck: null,
+  }
+  if (!existsSync(capturesDir)) return empty
+
+  const stored = new Set(listObjects(storeRoot))
+  let references = 0
+  let missing = 0
+  let missingLabelled = 0
+  let oldest: string | null = null
+  let newest: string | null = null
+
+  for (const name of readdirSync(capturesDir)) {
+    if (name === OBJECTS_DIR) continue
+    const dir = join(capturesDir, name)
+    const manifest = readManifest(dir)
+    if (!manifest) continue
+
+    for (const hash of Object.values(manifest.objects ?? {})) {
+      references++
+      if (stored.has(hash)) continue
+      missing++
+
+      let at = manifest.capturedAt ?? null
+      let labelled = false
+      try {
+        const meta = JSON.parse(readFileSync(join(dir, 'capture-metadata.json'), 'utf-8')) as
+          { capturedAt?: string; label?: string }
+        at = meta.capturedAt ?? at
+        labelled = Boolean(meta.label) && meta.label !== 'unconfirmed'
+      } catch { /* the manifest's own date is enough to place it */ }
+
+      if (labelled) missingLabelled++
+      if (at) {
+        if (!oldest || at < oldest) oldest = at
+        if (!newest || at > newest) newest = at
+      }
+    }
+  }
+
+  return {
+    references, missing, missingLabelled,
+    oldestMissing: oldest, newestMissing: newest,
+    newSinceLastCheck: previous === undefined || previous === null ? null : missing - previous,
+  }
+}
+
+// The count from the last run, so the startup line can say "and this many are
+// new" rather than reprinting a constant every time.
+export function readIntegrityState(outputDir: string): number | null {
+  try {
+    const raw = JSON.parse(readFileSync(join(outputDir, INTEGRITY_STATE), 'utf-8')) as { missing?: number }
+    return typeof raw.missing === 'number' ? raw.missing : null
+  } catch {
+    return null
+  }
+}
+
+export function writeIntegrityState(outputDir: string, result: ObjectIntegrity, at: string): void {
+  try {
+    writeFileSync(
+      join(outputDir, INTEGRITY_STATE),
+      JSON.stringify({ missing: result.missing, references: result.references, checkedAt: at }, null, 2)
+    )
+  } catch { /* a state file that cannot be written costs the delta, not the check */ }
+}
+
 // Mark and sweep over the shared store: an object survives if a capture still
 // on disk names it, and goes otherwise. This is the only thing that frees the
 // bytes behind an expired capture, since deleting the directory leaves the
