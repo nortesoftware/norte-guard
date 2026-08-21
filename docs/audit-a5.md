@@ -2004,3 +2004,66 @@ B was already out on the grounds that reachability saturates. D adds a second
 reason it would not have helped: for the `ltidi` packages there is no capability
 to be coherent or incoherent with, because there is no code. `module.exports = {}`
 declares nothing and does nothing, and both are true.
+
+## The concentration base rate, measured before any threshold
+
+The signal is not that a package declares an off-registry dependency — 42 names
+do that and 41 of them are ordinary. It is that **one operator points many names
+at one destination**.
+
+Measured over 25,394 captures covering 13,344 distinct names, as
+`(operator, destination)` pairs:
+
+| distinct names in the pair | pairs |
+|---|---|
+| 1 | **30 (90.9%)** |
+| 2 | 2 |
+| 3 to 7 | **0** |
+| **8** | **1** — `whltd4 → ltidi.storage.googleapis.com` |
+
+**The region between 2 and 8 is empty.** Nothing in this corpus sits between an
+ordinary use and the campaign.
+
+### The window
+
+The eight names span 3,434 minutes — 2.4 days — so a short window might have been
+expected to miss it. It does not, because the publications came in bursts:
+
+| rolling window | distribution of peak names per pair | pairs reaching 3 or more |
+|---|---|---|
+| 60 min | 1:31, 2:1, **5:1** | 1 (`whltd4`) |
+| 6 h | 1:31, 2:1, **5:1** | 1 |
+| 24 h | 1:31, 2:1, **5:1** | 1 |
+| 72 h | 1:30, 2:2, **8:1** | 1 |
+
+A **60-minute** window is enough: the 2026-08-13 burst put five names on the
+bucket in eight minutes. No other pair exceeds two names at any window tested.
+
+### Why this is measurable prospectively, and why it matters
+
+Every input is in the packument. The watcher already fetches one per publication,
+so a rolling map from `(operator, off-registry host)` to the names seen in the
+last hour needs **no tarball, no parse, and no content analysis at all**. The
+state is small: 33 pairs over nine days.
+
+That is the point. This is the only endpoint in the whole audit that attacks the
+class described in the README limit — a package with no code in it — because it
+never looks at the code. Every other measurement in A5 reads a tarball, and these
+eight packages put nothing in theirs.
+
+### No threshold is proposed here
+
+The base rate was measured first, as it should have been for `fabricatedProfile`
+and was not. What it shows is a gap, not a cut-off, and three things stand
+between that gap and a rule:
+
+1. **The pool is this collector's capture filter**, not npm. Every rate above
+   describes an enriched population.
+2. **n = 1.** One malicious pair. A threshold anywhere in 3 to 5 separates this
+   corpus perfectly and is fitted to a single event.
+3. **`operator` is itself inferred.** The unit rests on the declared links in
+   `operator.ts`, and a wrong link would merge or split a pair.
+
+What would settle it is a second campaign. Until one arrives the measurement is
+recorded and the rule is not written — which is the discipline D14 exists to
+enforce, applied to this project's own idea rather than to someone else's.

