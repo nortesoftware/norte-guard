@@ -1722,6 +1722,20 @@ survive a second hop.
 
 ## C1 — the destinations, and the carrier npm never hosted
 
+> **Correction, 2026-08-21.** This section was written as though the mechanism it
+> describes were an observation of this project's. It is not. The technique is
+> **PhantomRaven**, published by Koi Security in October 2025 as *Remote Dynamic
+> Dependencies*; Socket ships a detection rule for the shape; and all eight
+> packages already carried OSV/GHSA advisories, the `gunzip-js` one published
+> about an hour after this collector captured it and already naming the bucket,
+> the `depenconf` path, the version squat and the empty index.
+>
+> Nothing below is withdrawn — the measurements are correct — but every sentence
+> that reads as discovery should be read as **independent re-observation of
+> published work**. See [prior-art.md](prior-art.md) for the citations and for the
+> classification of every other piece in this audit.
+
+
 Reachability saturates because "can this package reach the network" is answered
 `reached` by most of npm and `indeterminate` by the rest. Destinations do not:
 stolen credentials are worthless where they are, and leaving means a host.
@@ -2067,3 +2081,31 @@ between that gap and a rule:
 What would settle it is a second campaign. Until one arrives the measurement is
 recorded and the rule is not written — which is the discipline D14 exists to
 enforce, applied to this project's own idea rather than to someone else's.
+
+## The prior-art rule
+
+Added 2026-08-21, after C1 was written up as a finding and turned out to be a
+re-observation of PhantomRaven — caught only because someone went looking for an
+address to report it to.
+
+**No piece of this work is documented as a finding until prior art has been
+searched.** Academic (Backstabber's Knife Collection and what cites it; MSR,
+USENIX, CCS on registry supply chain), industry (Socket, Aikido, Phylum, Koi,
+Checkmarx, StepSecurity, Snyk, Sonatype, JFrog, ReversingLabs, Endor), advisory
+databases (GHSA, OSV, npm advisories) and the tooling that already ships
+(socket-cli, npq, lockfile-lint).
+
+Each piece is classified `replication`, `extension`, or `not found` — never
+`novel`, because a dozen web searches is not a literature review and absence of
+evidence at that depth is weak. A replication is still worth having and gets said
+as a replication.
+
+The full classification of everything built here is in
+[prior-art.md](prior-art.md). The short version: most of it is replication, the
+largest genuinely-unduplicated part is the **negative** results, and the one
+extension worth writing up is the base-rate distribution of
+`(operator, off-registry destination)` pairs — which is an extension of a Socket
+observation about shared exfiltration hosts, not a new idea.
+
+This is the same discipline already applied to numbers, applied to claims:
+nothing asserted without verification.

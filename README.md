@@ -60,12 +60,18 @@ returns "this package does nothing", correctly.
 eight packages; the bucket was unaffected. A takedown reaches what the registry
 hosts, and an off-registry dependency is hosted somewhere else.
 
+This class is **PhantomRaven**, published by Koi Security in October 2025 as
+*Remote Dynamic Dependencies*, and Socket already ships an `HTTP Dependency`
+alert for the shape. It is described here because it bounds what this tool can
+do, not because it is new — see [docs/prior-art.md](docs/prior-art.md), which
+classifies every piece of this work as replication, extension, or not-found, and
+exists because the mechanism above was nearly written up as a discovery.
+
 What is measurable without reading any content is that the specifier is not a
 registry range at all. Over 25,394 publications covering 13,344 distinct names,
 42 names (0.315%) declare one, across five destinations — `file:` links,
 `github:` shorthand, a vendor that distributes off-registry deliberately, and one
-bucket. See [docs/audit-a5.md](docs/audit-a5.md) and
-[docs/disclosure-ltidi.md](docs/disclosure-ltidi.md).
+bucket.
 
 ## Install
 
