@@ -342,14 +342,21 @@ export const QUARANTINE_CAPTURE_REASON = 'quarantine-no-genome'
 //
 // The difference was eleven true positives. A capture only carried
 // `label: confirmed_malicious` if something had gone back and relabelled it, and
-// relabelling happened for the six packages A5 needed and for nothing else. The
-// takedown log meanwhile holds 233 distinct removed names across five files, 53
-// of which this collector had captured, 36 of them through quarantine. Twenty
-// five of those 36 are captures of npm's own `0.0.1-security` tombstone and
-// prove nothing — the collector saw the placeholder, not the artifact — and the
-// remaining ELEVEN are genuine pre-removal observations the promotion gate had
-// never counted, because it was reading `takedowns.json`, a single sweep frozen
-// on 2026-08-12.
+// relabelling happened for the six packages A5 needed and for nothing else. As
+// measured on 2026-08-19, the takedown log held 233 distinct removed names across
+// five files, 53 of which this collector had captured, 36 of them through
+// quarantine. Twenty five of those 36 were captures of npm's own
+// `0.0.1-security` tombstone and prove nothing — the collector saw the
+// placeholder, not the artifact — and the remaining ELEVEN were genuine
+// pre-removal observations the promotion gate had never counted, because it was
+// reading `takedowns.json`, a single sweep frozen on 2026-08-12.
+//
+// Those figures are the day the defect was found and they are already stale;
+// they are dated rather than updated because the argument is about the gap
+// between labels and events, not about its size on any one morning. Recounted
+// 2026-08-21: 7 files, 380 distinct removed names, 110 with a capture, 50
+// through quarantine, 25 tombstone-only and 25 genuine pre-removal. The
+// authority is `readLiveTakedowns` plus the corpus, not this comment.
 export function verdictsFromCaptures(
   captures: ClassCapture[],
   removedNames: ReadonlySet<string> = new Set(),
@@ -478,10 +485,17 @@ export const PROMOTION_MAX_FALSE_POSITIVE_RATE =
 // of 0 over a handful of packages shows nothing. The test is therefore against
 // the UPPER 95% bound of the observed rate, which has the property the count
 // version lacked: it cannot be satisfied by a small sample. With zero false
-// positives observed the bound clears 0.164% at n = 1,829 tracked packages
-// (Wilson; the rule of three gives the same order), and no sooner. That number
-// is not a hurdle added on top — it is what claiming this rate honestly costs,
-// and it is reported so "not yet" carries its own distance.
+// positives observed the bound clears 0.164% at n = 2,332 tracked packages, and
+// no sooner. That number is not a hurdle added on top — it is what claiming this
+// rate honestly costs, and it is reported so "not yet" carries its own distance.
+//
+// This comment said 1,829 until it was checked against the function below it.
+// wilsonInterval(0, 1829).high is 0.2096%, which does not clear 0.164%, and
+// 1,829 is not the rule-of-three figure either — that is 1,824, 22% under the
+// Wilson requirement, so the parenthetical claiming the two agreed to the same
+// order was doing the work of hiding the gap rather than reporting it. The one
+// authority is `minimumTrackedFor`, which searches the same interval the gate
+// tests on; every number quoted here now comes from it.
 //
 // Three independent npm accounts among the removals, too. The eleven true
 // positives the removal record turned up come from four accounts, and six of

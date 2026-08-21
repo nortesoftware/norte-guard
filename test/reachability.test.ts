@@ -427,7 +427,13 @@ describe('shapes that broke the corpus pass', () => {
     expect(result.origins.length).toBeGreaterThan(0)
     // 40 distinct modules, however many statements name them.
     expect(new Set(result.origins.map(o => o.module)).size).toBe(40)
-  })
+    // And the explicit timeout, because halving the work was not enough: on a
+    // single-core machine under load this takes 11s of wall clock for 6s of CPU,
+    // and it fails on the default 5s having tested nothing but the scheduler.
+    // What it asserts is that merge() does not overflow the stack — a
+    // correctness property with no deadline in it — so the budget is set wide
+    // enough that only a real hang trips it.
+  }, 60_000)
 
   it('a deeply chained expression does not overflow the evaluator', () => {
     const src = `const fs = require('fs'); fs` + '.a'.repeat(2_000)

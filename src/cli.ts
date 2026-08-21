@@ -196,6 +196,123 @@ async function main(): Promise<void> {
       return
     }
 
+    // The A5 case arm, without running A5. The count of distinct npm accounts on
+    // the case side is what decides whether the study is worth re-running, and
+    // until this existed the only way to get it was to re-derive the cohort by
+    // hand — which is how a decision number stops being consulted and starts
+    // being remembered wrong.
+    if (args.includes('--publishers')) {
+      const { casePublisherReport, readLatestControlRun, PRIMARY_UNIT, POWER_MARGIN, MAX_PUBLISHERS_SEARCHED } =
+        await import('./capability-control.js')
+      const { pct } = await import('./stats.js')
+
+      const resultsDir = args.find(a => a.startsWith('--results-dir='))?.split('=')[1] ?? 'capability-results'
+      const report = casePublisherReport({
+        corpus: loadCorpus(),
+        lastRun: readLatestControlRun(resultsDir),
+      })
+
+      if (args.includes('--json')) {
+        console.log(JSON.stringify(report, null, 2))
+        return
+      }
+
+      console.log(
+        `\nTHE A5 CASE ARM   ${report.operators} operators` +
+        (report.publishers !== report.operators ? ` (${report.publishers} npm accounts)` : '')
+      )
+      console.log(
+        `  ${report.confirmedCaptures} confirmed_malicious captures, ${report.confirmedWithBytes} with bytes\n` +
+        `  ${report.captures} captures  ->  ${report.packages} packages  ->  ${report.publishers} accounts`
+      )
+      for (const p of report.breakdown) {
+        console.log(
+          `    ${p.publisher.padEnd(16)} ${String(p.captures).padStart(3)} ` +
+          `${p.captures === 1 ? 'capture ' : 'captures'}   ${p.packages.join(', ')}`
+        )
+      }
+      if (report.excludedByName.length > 0) {
+        console.log(`  excluded by name (defined the class): ${report.excludedByName.join(', ')}`)
+      }
+      if (report.unclassifiable > 0) {
+        console.log(`  ${report.unclassifiable} could not be classified: no packument, or the captured version missing from it`)
+      }
+
+      // Printed beside the count rather than under it. These are confirmed
+      // removals that are already caught and already labelled, and the only
+      // reason they are not cases is that their bytes were deleted.
+      console.log(
+        `\nCONFIRMED, BUT NOT MEASURABLE\n` +
+        `  ${report.lost.captures} captures of ${report.lost.packages} packages from ` +
+        `${report.lost.publishers} accounts have no tarball left`
+      )
+      if (report.lost.publishersOnlyHere.length > 0) {
+        console.log(
+          `  ${report.lost.publishersOnlyHere.length} of those accounts appear nowhere else in the case arm, ` +
+          `so they are\n  accounts A5 would have had: ${report.lost.publishersOnlyHere.join(', ')}`
+        )
+      }
+
+      if (report.power) {
+        console.log(
+          `\nWHAT THE COUNT WOULD HAVE TO BE   against the ${report.power.nControls} control ` +
+          `${PRIMARY_UNIT}s of the run of ${report.power.fromRun.slice(0, 10)}`
+        )
+        // Every column here is per capability, because the denominator is. The
+        // comparison runs over the members that ANSWERED, so credential_read is
+        // a test on 49 controls and not on 125, and a requirement computed on
+        // the member count would be a requirement for a different comparison.
+        console.log(
+          `  ${'capability'.padEnd(17)} ${'ctrl rate'.padStart(9)} ${'of'.padStart(5)}  ` +
+          `${'case det'.padStart(8)}  ${'ceiling'.padStart(8)}  ${'accounts needed'.padStart(15)}`
+        )
+        for (const c of report.power.byCapability) {
+          const needed = c.publishersNeeded === null
+            ? c.determinateShare <= 0 ? 'no case answers' : `over ${MAX_PUBLISHERS_SEARCHED}`
+            : c.firstSeparating !== null && c.firstSeparating < c.publishersNeeded
+              ? `${c.publishersNeeded} (${c.firstSeparating})`
+              : `${c.publishersNeeded}`
+          console.log(
+            `  ${c.capability.padEnd(17)} ${pct(c.controlRate, 1).padStart(9)} ` +
+            `${String(c.nDeterminate).padStart(5)}  ${pct(c.determinateShare, 0).padStart(8)}  ` +
+            `${pct(c.ceiling, 1).padStart(8)}  ${needed.padStart(15)}` +
+            (c.controlRateUnderCeiling ? '' : '   [over the ceiling]')
+          )
+        }
+        console.log(
+          `\n  ctrl rate is over the controls that ANSWERED, and "of" is how many those were —\n` +
+          `  the comparison never sees an indeterminate member, on either side. "case det" is\n` +
+          `  the share of cases that answered. "ceiling" is the commonest a control rate could\n` +
+          `  be and still separate at today's ${report.publishers} accounts; a rate above it cannot be\n` +
+          `  separated whatever the cases do. "accounts needed" is for a difference of ` +
+          `${pct(POWER_MARGIN, 0)} to\n  separate at z=${report.power.z.toFixed(2)}, holding that determinate share.`
+        )
+        // The parenthesis is the first n that separates AT ALL. Both n and the
+        // reach count round to whole accounts, so `separated` is not monotone:
+        // between the two numbers there are counts where one more account takes
+        // the answer away again. The headline figure is the one from which it
+        // keeps separating, and the gap is printed rather than smoothed over.
+        if (report.power.byCapability.some(c =>
+          c.publishersNeeded !== null && c.firstSeparating !== null &&
+          c.firstSeparating < c.publishersNeeded
+        )) {
+          console.log(
+            `  Where two numbers are given, the second is the first n that separates at all.\n` +
+            `  Rounding makes separation non-monotone, so between them there are account\n` +
+            `  counts that stop separating again; only the first number holds for every\n` +
+            `  larger n.`
+          )
+        }
+      }
+
+      for (const caveat of report.caveats) {
+        console.log()
+        for (const line of wrap(caveat, 74)) console.log(`  ! ${line}`)
+      }
+      console.log()
+      return
+    }
+
     const corpus = loadCorpus()
 
     console.log(`\nCorpus: ${corpus.roots.join(', ')}`)
@@ -312,6 +429,24 @@ async function main(): Promise<void> {
       `  This is the filter that fills the corpus, not the rule that fails builds.\n` +
       `  The rule needs a fifth condition the filter never evaluates.`
     )
+
+    // The other number this corpus is kept for. Confirmed captures are what the
+    // recall denominator is built from; distinct ACCOUNTS among the ones that
+    // still have bytes are what decides whether A5 can be run at all, and the
+    // two move independently — 87 confirmed is 56 with bytes is 8 accounts.
+    {
+      const { casePublisherReport, readLatestControlRun } = await import('./capability-control.js')
+      const resultsDir = args.find(a => a.startsWith('--results-dir='))?.split('=')[1] ?? 'capability-results'
+      const a5 = casePublisherReport({ corpus, lastRun: readLatestControlRun(resultsDir) })
+      console.log(
+        `\nTHE A5 CASE ARM (the number that decides whether the controlled study can run)\n` +
+        `  ${a5.captures} captures  ->  ${a5.packages} packages  ->  ${a5.publishers} npm accounts` +
+        (a5.lost.captures > 0
+          ? `\n  ${a5.lost.captures} more confirmed captures have no tarball and cannot enter it`
+          : '') +
+        `\n  see \`norte-guard corpus --publishers\` for the breakdown and what it would have to be`
+      )
+    }
 
     if (!args.includes('--no-size')) {
       for (const root of corpus.roots) {
@@ -510,6 +645,7 @@ async function main(): Promise<void> {
         matchRatio: Number.isFinite(ratio) ? ratio : undefined,
         since: args.find(a => a.startsWith('--since='))?.split('=')[1],
         until: args.find(a => a.startsWith('--until='))?.split('=')[1],
+        controlCaptureReason: args.find(a => a.startsWith('--control-class='))?.split('=')[1],
         onProgress: (stage, d, t) => {
           if (d === t || d % 25 === 0) process.stderr.write(`  ${stage}: ${d}/${t}\n`)
         },
@@ -557,6 +693,12 @@ async function main(): Promise<void> {
       }
 
       console.log(`\nTHE POOL THE CONTROL WAS DRAWN FROM`)
+      console.log(
+        report.design.controlCaptureReason
+          ? `  restricted to captureReason=${report.design.controlCaptureReason} — a control drawn through the same filter as the cases`
+          : `  every capture reason. The arms are NOT drawn through the same filter in the same\n` +
+            `  proportion; see the composition printed with each unit below, and --control-class=<r>.`
+      )
       console.log(`  ${report.pool.inWindow} uncontaminated captures in the window, ${report.pool.withBytes} with bytes`)
       console.log(`  ${report.pool.afterRemovedExcluded} left after removing every package known to have been withdrawn (${report.pool.removedKnown} names known)`)
       for (const src of report.pool.removedBySource) {
@@ -661,6 +803,12 @@ async function main(): Promise<void> {
           `  pooled median unpacked size (NOT the match, which is per case above): ` +
           `cases ${c.cases.medianUnpackedSize ?? '?'} B, controls ${c.controls.medianUnpackedSize ?? '?'} B`
         )
+        // Which filter each arm came through, printed beside the sizes. The two
+        // reasons select different populations, so a mix that differs between
+        // the arms is a difference the size match does not remove.
+        const mix = (g: typeof c.cases) =>
+          g.byCaptureReason.map(r => `${r.reason} ${r.members}`).join(', ')
+        console.log(`  drawn through: cases ${mix(c.cases)};  controls ${mix(c.controls)}`)
         console.log(`  what this unit could find: ${c.power.statement}`)
         console.log(
           `  ships something no parser reads: cases ${c.cases.shipsOpaqueExecutable}/${c.cases.members}, ` +
@@ -706,6 +854,76 @@ async function main(): Promise<void> {
             `(z=${report.endpointZ.toFixed(2)}): ${formatDifference(capability.familyAdjusted)}`
           )
           console.log(`    ${capability.verdict}`)
+        }
+      }
+
+      // IDEA 1 AND 2. Printed after the five unit tables and before the post-hoc
+      // block: it is a different endpoint on the same data, not a different view
+      // of the same endpoint, and the family correction already covers it.
+      {
+        const o = report.opacity
+        console.log(`\n${'='.repeat(74)}`)
+        console.log(`WHAT THE WALK COULD NOT FOLLOW, AS THE MEASUREMENT   at the ${o.unit} unit`)
+        for (const line of wrap(o.note, 74)) console.log(`  ${line}`)
+        console.log(
+          `\n  ${o.withoutProfile.cases} cases and ${o.withoutProfile.controls} controls have no profile at all ` +
+          `(never opened),\n  and are held out rather than counted as hiding nothing.`
+        )
+
+        console.log(`\n  ${'measure'.padEnd(34)} ${'cases'.padEnd(14)} ${'controls'.padEnd(14)}`)
+        for (const c of o.binary) {
+          const cell = (r: typeof c.cases) =>
+            `${r.successes}/${r.n} ${r.rate === null ? 'n/a' : pct(r.rate, 0)}`
+          console.log(`  ${c.measure.padEnd(34)} ${cell(c.cases).padEnd(14)} ${cell(c.controls).padEnd(14)}`)
+          console.log(`    over ${c.unitOfMeasure}`)
+          console.log(`    unadjusted: ${formatDifference(c.difference)}`)
+          console.log(
+            `    widened for the ${report.endpointFamily} interval comparisons this run printed ` +
+            `(z=${report.endpointZ.toFixed(2)}): ${formatDifference(c.familyAdjusted)}`
+          )
+          console.log(`    ${c.verdict}`)
+        }
+
+        console.log(`\n  CONTINUOUS — described, not tested: no interval, no threshold, no p-value.`)
+        for (const c of o.continuous) {
+          console.log(
+            `  ${c.measure.padEnd(46)} median cases ${c.caseMedian === null ? 'n/a' : c.caseMedian.toFixed(3)}, ` +
+            `controls ${c.controlMedian === null ? 'n/a' : c.controlMedian.toFixed(3)}`
+          )
+          console.log(
+            `    over ${c.unitOfMeasure}; P(a random case exceeds a random control) = ` +
+            `${c.probabilityCaseExceedsControl === null ? 'n/a' : pct(c.probabilityCaseExceedsControl, 1)}` +
+            `  [n=${c.caseN} vs ${c.controlN}]`
+          )
+          for (const line of wrap(c.note, 70)) console.log(`      ${line}`)
+        }
+
+        console.log(`\n  ON RESOLVED EVIDENCE ALONE  (idea 2)`)
+        for (const line of wrap(o.strict.note, 72)) console.log(`    ${line}`)
+        const anyDemoted = o.strict.demoted.some(d => d.cases > 0 || d.controls > 0)
+        if (!anyDemoted) {
+          console.log(
+            `\n    NOTHING WAS DEMOTED. Every frozen 'reached' in both arms rested on a module\n` +
+            `    resolved by name or an ambient call the parser read, so the strict definition\n` +
+            `    is the frozen one on this data and idea 2 changed no answer. That is a result:\n` +
+            `    reached-by-ignorance is not what was contaminating the comparison.`
+          )
+        } else {
+          console.log(`\n    frozen 'reached' demoted to indeterminate:`)
+          for (const d of o.strict.demoted) {
+            if (d.cases === 0 && d.controls === 0) continue
+            console.log(`      ${d.capability.padEnd(17)} cases ${d.cases}, controls ${d.controls}`)
+          }
+        }
+        for (const c of o.strict.capabilities) {
+          const a = o.strict.cases.byCapability.find(x => x.capability === c.capability)!
+          const b = o.strict.controls.byCapability.find(x => x.capability === c.capability)!
+          const cell = (x: typeof a) => `${x.reached}r ${x.notReached}n ${x.indeterminate}?`
+          console.log(
+            `\n    ${c.capability.padEnd(17)} cases ${cell(a).padEnd(14)} controls ${cell(b)}`
+          )
+          console.log(`      ${formatDifference(c.familyAdjusted)}`)
+          console.log(`      ${c.verdict}`)
         }
       }
 
@@ -825,6 +1043,268 @@ async function main(): Promise<void> {
     console.log(`\nWHAT THIS CANNOT SAY`)
     for (const caveat of capabilityCaveats()) console.log(`  - ${caveat}`)
     console.log()
+    return
+  }
+
+  // D — the sibling diff. See sibling-diff.ts: the ranking is frozen and was
+  // validated against the two captures whose payload location is known.
+  if (command === 'sibling-diff') {
+    const { hashFiles, rankCandidates, styleOf, uniformityOf } = await import('./sibling-diff.js')
+    const { loadCorpus } = await import('./corpus.js')
+    const { readTar, gunzipIfNeeded, DEFAULT_TAR_LIMITS } = await import('./tarball.js')
+    const { NgpackSource } = await import('./ngpack.js')
+    const { capturePackument } = await import('./size-control.js')
+    const { publisherFor } = await import('./metadata-signals.js')
+    const { operatorOf } = await import('./operator.js')
+    const { classifyFile } = await import('./file-kind.js')
+
+    const corpus = loadCorpus()
+    const groups = new Map<string, Map<string, { package: string; version: string; files: ReturnType<typeof hashFiles> }>>()
+    const styles = new Map<string, ReturnType<typeof styleOf>[]>()
+
+    for (const sample of corpus.samples) {
+      if (sample.label !== 'confirmed_malicious' || !sample.tarballPresent) continue
+      const packument = capturePackument(sample.ngpackPath)
+      if (!packument) continue
+      const publisher = publisherFor(packument, sample.version)
+      if (publisher === null) continue
+      const operator = operatorOf(publisher) ?? publisher
+
+      const group = groups.get(operator) ?? new Map()
+      if (group.has(sample.package)) { groups.set(operator, group); continue }
+
+      try {
+        const source = new NgpackSource(sample.ngpackPath)
+        const tarball = source.tarballSync(sample.version)
+        if (!tarball) continue
+        const entries = readTar(gunzipIfNeeded(tarball, 256 * 1024 * 1024), DEFAULT_TAR_LIMITS).entries
+        group.set(sample.package, {
+          package: sample.package,
+          version: sample.version,
+          files: hashFiles(entries.map(e => ({ name: e.name, data: e.data }))),
+        })
+        const readable = entries
+          .filter(e => {
+            const kind = classifyFile(e.name, e.data.subarray(0, 512)).kind
+            return (kind === 'javascript' || kind === 'typed-source') && e.size <= 2 * 1024 * 1024
+          })
+          .map(e => styleOf(e.name, e.data.toString('utf-8')))
+        if (readable.length >= 2) styles.set(`${sample.package}@${sample.version}`, readable)
+      } catch { continue }
+      groups.set(operator, group)
+    }
+
+    console.log(`\nD2 — WHAT IS NOT IDENTICAL BETWEEN SIBLINGS`)
+    console.log(`  tier 1 = a path only one sibling has · tier 2 = shared path, different bytes`)
+    console.log(`  tier 3 = shared path, byte-identical (the scaffolding). Largest first inside a tier.`)
+    for (const [operator, group] of groups) {
+      if (group.size < 2) continue
+      console.log(`\n  ${operator}  (${group.size} siblings)`)
+      for (const c of rankCandidates([...group.values()]).slice(0, 6)) {
+        console.log(
+          `    t${c.tier} ${String(c.size).padStart(7)}B  ${c.siblingsWithSameContent}/${c.siblingsWithPath} siblings  ` +
+          `${c.package}  ${c.file}`
+        )
+      }
+    }
+
+    console.log(`\nD1 — INTERNAL UNIFORMITY  (a negative, kept so it is not rediscovered)`)
+    let flagged = 0
+    for (const [key, fingerprints] of styles) {
+      const report = uniformityOf(key, fingerprints)
+      if (report.outliers.length === 0) continue
+      flagged += 1
+      console.log(`  ${key}  outliers: ${report.outliers.join(', ')}`)
+    }
+    console.log(`  ${flagged} of ${styles.size} captures with two or more readable files have a style outlier.`)
+    console.log(`  Neither known payload is among them, and neither could be: calc.dat is magic`)
+    console.log(`  bytes and the ltidi payload is a line of JSON. D1 reads JavaScript only.`)
+    console.log()
+    return
+  }
+
+  // C1 — the destinations, extracted from every file rather than parsed from the
+  // ones a JavaScript parser can read. See destinations.ts.
+  if (command === 'destinations') {
+    const { profileOf, compareDestinations } = await import('./destinations.js')
+    const { loadCorpus } = await import('./corpus.js')
+    const { readTar, gunzipIfNeeded, DEFAULT_TAR_LIMITS } = await import('./tarball.js')
+    const { capturePackument } = await import('./size-control.js')
+    const { publisherFor } = await import('./metadata-signals.js')
+    const { operatorOf } = await import('./operator.js')
+    const { NgpackSource } = await import('./ngpack.js')
+    const { rateWithCI, differenceWithCI, formatDifference } = await import('./stats.js')
+
+    const limit = Number(args.find(a => a.startsWith('--controls='))?.split('=')[1] ?? 4000)
+    const corpus = loadCorpus()
+    const cases: Array<{ profile: ReturnType<typeof profileOf>; operator: string }> = []
+    const controls: typeof cases = []
+
+    let done = 0
+    for (const sample of corpus.samples) {
+      if (!sample.tarballPresent) continue
+      const isCase = sample.label === 'confirmed_malicious'
+      if (!isCase && controls.length >= limit) continue
+      if (!isCase && sample.label !== 'unconfirmed') continue
+
+      const packument = capturePackument(sample.ngpackPath)
+      if (!packument) continue
+      const publisher = publisherFor(packument, sample.version)
+      if (publisher === null) continue
+
+      let files: Array<{ name: string; data: Buffer }>
+      try {
+        const source = new NgpackSource(sample.ngpackPath)
+        const tarball = source.tarballSync(sample.version)
+        if (!tarball) continue
+        files = readTar(gunzipIfNeeded(tarball, 512 * 1024 * 1024), DEFAULT_TAR_LIMITS)
+          .entries.map(e => ({ name: e.name, data: e.data }))
+      } catch { continue }
+
+      const entry = {
+        profile: profileOf({
+          package: sample.package,
+          version: sample.version,
+          files,
+          dependencies: packument.versions[sample.version]?.dependencies,
+        }),
+        operator: operatorOf(publisher) ?? publisher,
+      }
+      if (isCase) cases.push(entry)
+      else controls.push(entry)
+
+      if (++done % 200 === 0) process.stderr.write(`  ${done} read (${cases.length} cases, ${controls.length} controls)\n`)
+    }
+
+    const report = compareDestinations({ cases, controls })
+    if (args.includes('--json')) { console.log(JSON.stringify(report, null, 2)); return }
+
+    console.log(`\nDESTINATIONS  —  extracted from bytes, not parsed from source`)
+    console.log(`  ${report.caseCaptures} case captures (${report.caseOperators} operators), ` +
+      `${report.controlCaptures} control captures (${report.controlOperators} operators)`)
+    console.log(`  ${report.filesRead} files read, ${report.opaqueFiles} of them opaque to any analysis here`)
+    console.log(`  Strings still come out of an opaque file. A destination absent from a native`)
+    console.log(`  binary is not a destination that is not there.`)
+
+    console.log(`\nHOSTS ON THE CASE SIDE, and how many CONTROL packages also mention them`)
+    console.log(`  a host in one case and eight thousand controls is a CDN, not a destination`)
+    for (const h of report.caseHosts.slice(0, 25)) {
+      console.log(`  ${String(h.casePackages).padStart(3)} case  ${String(h.controlPackages).padStart(5)} control   ${h.host}`)
+    }
+
+    const nr = report.nonRegistry
+    console.log(`\nDEPENDENCIES NPM DOES NOT HOST`)
+    console.log(`  npm install fetches and runs these. The registry never saw them, cannot scan`)
+    console.log(`  them, and cannot take them down.`)
+    for (const [label, a, na, b, nb] of [
+      ['capture ', nr.caseCaptures, report.caseCaptures, nr.controlCaptures, report.controlCaptures],
+      ['operator', nr.caseOperators, report.caseOperators, nr.controlOperators, report.controlOperators],
+    ] as Array<[string, number, number, number, number]>) {
+      const d = differenceWithCI(a, na, b, nb)
+      const pct = (x: number, n: number): string => (n === 0 ? 'n/a' : `${(100 * (rateWithCI(x, n).rate ?? 0)).toFixed(2)}%`)
+      console.log(`  at the ${label} unit  cases ${a}/${na} ${pct(a, na)}   ` +
+        `controls ${b}/${nb} ${pct(b, nb)}   ${formatDifference(d)}`)
+    }
+    for (const h of nr.caseHosts) {
+      console.log(`    ${h.host}  <- ${h.operator}, ${h.packages} packages`)
+    }
+    console.log(`\n  POST HOC. This endpoint was written after reading the case tarballs, which is`)
+    console.log(`  what disqualifies it as evidence from this run, and it rests on ONE independent`)
+    console.log(`  operator. It is a hypothesis this pass generated, not a finding it established.`)
+
+    console.log(`\nC2 — HOSTS REACHED BY MORE THAN ONE OPERATOR`)
+    if (report.sharedAcrossOperators.length === 0) {
+      console.log(`  none.`)
+    } else {
+      for (const s of report.sharedAcrossOperators.slice(0, 12)) {
+        console.log(`  ${String(s.operators.length).padStart(2)}  ${s.host}`)
+        console.log(`      ${s.operators.slice(0, 8).join(', ')}${s.operators.length > 8 ? ' …' : ''}`)
+      }
+    }
+    console.log()
+    return
+  }
+
+  // The one-time pass over what a terminal 404 already cost. See backfill.ts:
+  // 6,892 announced publications were never analysed because the first fetch
+  // failed and nothing asked again.
+  if (command === 'backfill-404') {
+    const { runBackfill, terminalFailures, summarise } = await import('./backfill.js')
+    const { analyzePackage } = await import('./watcher.js')
+    const { DEFAULT_THRESHOLDS } = await import('./types.js')
+
+    const output = args.find(a => a.startsWith('--output='))?.split('=')[1] ?? './norte-guard-captures'
+    const limitArg = Number(args.find(a => a.startsWith('--limit='))?.split('=')[1] ?? NaN)
+    const dryRun = !args.includes('--run')
+
+    const pending = terminalFailures(output)
+    console.log(`\nBACKFILL — publications announced by the feed and never analysed`)
+    console.log(`  ${pending.length} terminal fetch failures in the change log`)
+    if (dryRun) {
+      console.log(`\n  Dry run. Nothing was fetched. Re-run with --run to replay them.`)
+      console.log(`  Each name costs one registry request, paced at 250ms.`)
+      console.log(`  Estimated wall clock for all of them: ${Math.round(pending.length * 0.25 / 60)} minutes.`)
+      return
+    }
+
+    const config = {
+      outputDir: output,
+      captureBudgetThreshold: DEFAULT_THRESHOLDS.gate.blockScore,
+    } as Parameters<typeof analyzePackage>[1]
+
+    const results = await runBackfill({
+      outputDir: output,
+      limit: Number.isFinite(limitArg) ? limitArg : undefined,
+      analyse: async name => {
+        const r = await analyzePackage(name, config, new Date().toISOString())
+        return { outcome: r.outcome, captured: r.scored?.captured }
+      },
+      onProgress: (done, total, outcome) => {
+        if (outcome.state === 'recovered' || done % 25 === 0) {
+          console.log(`  ${done}/${total}  ${outcome.state.padEnd(9)} ${outcome.package}`)
+        }
+      },
+    })
+
+    console.log(`\n${summarise(results)}\n`)
+    return
+  }
+
+  // The half of the question that does not need the archive. Same discipline as
+  // `capabilities --control` — size-matched, class-matchable, family-adjusted —
+  // over a cohort four hundred times larger, because a packument survives the
+  // takedown and a tarball does not.
+  if (command === 'metadata') {
+    const { runMetadataControl, renderMetadataReport } = await import('./metadata-run.js')
+    const { writeFileSync: write, mkdirSync } = await import('node:fs')
+
+    const output = args.find(a => a.startsWith('--output='))?.split('=')[1] ?? './norte-guard-captures'
+    const outDir = args.find(a => a.startsWith('--results-dir='))?.split('=')[1] ?? 'metadata-results'
+    const ratio = Number(args.find(a => a.startsWith('--ratio='))?.split('=')[1] ?? NaN)
+
+    const report = runMetadataControl({
+      outputDir: output,
+      matchRatio: Number.isFinite(ratio) ? ratio : undefined,
+      since: args.find(a => a.startsWith('--since='))?.split('=')[1],
+      until: args.find(a => a.startsWith('--until='))?.split('=')[1],
+      controlCaptureReason: args.find(a => a.startsWith('--control-class='))?.split('=')[1],
+    })
+
+    if (args.includes('--json')) {
+      console.log(JSON.stringify(report, null, 2))
+      return
+    }
+
+    const rendered = renderMetadataReport(report)
+    console.log(`\n${rendered}\n`)
+
+    if (args.includes('--save')) {
+      const day = report.until.slice(0, 10)
+      mkdirSync(outDir, { recursive: true })
+      write(`${outDir}/metadata-${day}-v${report.version}.json`, JSON.stringify(report, null, 2))
+      write(`${outDir}/metadata-${day}-report.txt`, `${rendered}\n`)
+      console.log(`Saved to ${outDir}/metadata-${day}-v${report.version}.json`)
+    }
     return
   }
 

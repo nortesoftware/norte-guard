@@ -553,3 +553,405 @@ and is not evidence from this run.
 --json                 the whole report
 --no-save              print without writing the artifact
 ```
+
+### `corpus --publishers` — the number that decides whether `--control` can run
+
+```bash
+norte-guard corpus --publishers
+```
+
+A5's blocker was never the count of captures. It is the count of distinct npm
+accounts on the case side, because `publisher` is the primary unit and its
+members are the only ones that are independent events. At 3 accounts nothing was
+claimable and the run said so — but the question *has that changed* had no answer
+short of re-deriving the cohort by hand, which is how a decision number stops
+being consulted and starts being remembered wrong.
+
+It calls the same `caseCohortOf` that `runCapabilityControl` calls, so the number
+cannot drift from the one A5 will use.
+
+```
+THE A5 CASE ARM   8 npm accounts
+  87 confirmed_malicious captures, 56 with bytes
+  56 captures  ->  15 packages  ->  8 accounts
+    siwatfa           36 captures   @siwatfa/yorn
+    ...
+
+CONFIRMED, BUT NOT MEASURABLE
+  31 captures of 12 packages from 4 accounts have no tarball left
+  2 of those accounts appear nowhere else in the case arm, so they are
+  accounts A5 would have had: graypin, javonayers999
+```
+
+**Three things travel with the count, and none of them is decoration.**
+
+The **lost** block is printed beside the number because these are confirmed
+removals that were caught and labelled, and the only reason they are not cases is
+that a sweep deleted their bytes (see the object store section of
+[audit-a5.md](audit-a5.md)). The case arm is short two accounts for a reason that
+is not a shortage of attacks.
+
+The **requirement** table states what the count would have to be, computed
+against the control arm of the newest saved run rather than against a constant —
+the control arm is not fixed, and it went from 49 accounts to 125 when the pool
+grew. Quoting a requirement against a control arm the study no longer has is a
+requirement for a different study.
+
+```
+  capability        ctrl rate    of  case det   ceiling  accounts needed
+  credential_read        6.1%    49       50%     26.5%          41 (31)
+  network_egress        24.3%    70       63%     32.9%          56 (52)
+  external_exec         32.9%    79       63%     32.9%          60 (49)
+  dynamic_code          15.9%    69       75%     36.2%          37 (30)
+```
+
+The **second number is the first n that separates at all**, and it is printed
+because separation is *not monotone in n*. Both the account count and the reach
+count round to whole publishers, so `credential_read` separates at 31 accounts and
+then fails again at 33, 34, 39 and 40 before holding from 41; `external_exec`
+separates at 49 and fails at 51, 54, 55, 56 and 59 before holding from 60. A
+number that decides when to re-run a study cannot be one where a ninth account
+takes the answer away, so the headline figure is the threshold from which every
+larger n separates.
+
+Every column is **per capability, because the denominator is**. `compareAt`
+compares `overDeterminate` against `overDeterminate`, so `credential_read` is a
+test on 49 controls and not on 125, and a requirement computed against the member
+count would be a requirement for a comparison this study does not make. The
+`ceiling` column is the commonest a control rate could be and still separate at
+today's account count; a rate above it cannot be separated whatever the cases do.
+
+The **determinate share** is the column a reader skips and the one that makes the
+table honest. A case that ships a bytecode blob answers indeterminate to all
+four, and an indeterminate case is not a case with an unknown value — it is a
+case that leaves the denominator. Accounts arrive; *determinate* accounts arrive
+more slowly. So the requirement column is not a schedule: a case arm that became
+legible enough to fill it would be a cohort of attackers who had stopped hiding.
+
+And the count is of **accounts, not operators**. Nothing here establishes that
+two accounts are two people, which is the same reason
+`PROMOTION_MIN_TAKEDOWN_PUBLISHERS` in `watchlist.ts` is a floor rather than a
+measurement. Read it as an upper bound on the independent events in the case arm.
+
+```
+--results-dir=<dir>    the saved run to state the requirement against
+                       (default capability-results)
+--json                 the whole report
+```
+
+The same three-line summary is printed by bare `norte-guard corpus`, under
+`THE A5 CASE ARM`, so the number is visible without knowing the flag exists.
+
+### The opacity endpoints — when the four capabilities saturate
+
+The four capabilities separate nothing at the primary unit, and adding accounts
+has not changed that. But every one of those answers comes from a walk that also
+records **where it lost the trail**, and until 2026-08-21 that record was consumed
+only as a blinder — a reason to answer `indeterminate` — never as a measurement.
+
+The hypothesis: an honest package does not need to hide its imports. A specifier
+assembled at runtime, a computed member, a callee that only exists once the
+program runs — each is a place the analysis stops, and if the case arm stops it
+more often than a size-matched control does, then **the inability to resolve is
+the discriminant** and the four capabilities were the wrong endpoint.
+
+**Two kinds of not-knowing, counted apart.** This is the distinction the whole
+section rests on:
+
+| counted against the package | counted against this analyser |
+|---|---|
+| `dynamic-specifier`, `dynamic-eval`, `computed-member`, `unresolved-callee` | `depth-limit`, `origin-bound`, `ambient-bound`, `argument-bound`, `unresolved-import` |
+
+The right-hand column is budgets *this project chose*. A package cannot be blamed
+for them, and folding them in would measure the analyser on both arms and report
+the result as a property of malware. Both are printed; only the left is the
+signal.
+
+Sites are counted **once per `file:line`**, not per occurrence. One construct
+reached four hundred times is one authoring decision, and counting occurrences
+would let file size decide the answer.
+
+**On resolved evidence alone.** `capabilities.ts` turns a `dynamic-specifier` lost
+point into positive evidence for `dynamic_code` — correct by the definition frozen
+before the run, and also the analysis reporting its own failure. So a strict
+answer is computed beside the frozen one, counting only a module resolved by name
+or an ambient call the parser read. A frozen `reached` that rested on a lost
+specifier becomes **`indeterminate`, never `not-reached`**: failing to read a
+specifier is not evidence that it does not reach. Reported apart from the frozen
+answers, exactly as the post-hoc `credential_read` block is.
+
+**The family was widened, and the capabilities paid for it too.** Testing more
+endpoints on the same data *because the first four saturated* is the textbook
+shape of multiplicity. `OPACITY_ENDPOINTS = 9` (five binary opacity measures, four
+strict-capability comparisons) is declared beside the other pre-run constants and
+added to the capability family, so the correction covers everything the run
+prints. The four capability intervals in this run are therefore **wider** than in
+the run before it. That is the cost of having looked at more, and charging it only
+to the new endpoints would be helping oneself.
+
+The continuous measures — import resolution rate, opacity sites per file — add
+nothing to the family: they are reported as medians and a common-language effect
+size, with no interval and no threshold. That is a description and not a test, and
+the output says so.
+
+---
+
+## `norte-guard metadata` — the half that does not need the archive
+
+```
+norte-guard metadata                                     # the comparison
+norte-guard metadata --control-class=quarantine-no-genome  # both arms, one filter
+norte-guard metadata --save --results-dir=metadata-results
+norte-guard metadata --json
+```
+
+Every endpoint in `capabilities --control` is answered by reading bytes, and that
+is why it is a run over 56 captures. 66.8% of this store kept no artifact, **0 of
+42** confirmed removals collected elsewhere kept one, and a question about
+contents cannot be asked of any of them.
+
+This run asks only what the packument answers, so its cohort is **24,307
+packuments** and its case arm is 87 captures — **31 of them with no bytes at
+all**. npm deletes the versions of a removed package and keeps `time`, so the
+whole release cadence of an attack survives its takedown.
+
+It is not a better run. It is a run over different endpoints, most of which are
+downstream of the filter that selected the corpus.
+
+### Contamination is a column, not a footnote
+
+D11 established that any endpoint which is an INPUT to the capture decision
+separates against the raw pool and vanishes against a class-matched one. Every
+endpoint here carries a frozen declaration of its relation to the three conjuncts
+(`young`, `tiny`, `!hasRepository`), and the verdict is worded from it:
+
+| status | meaning | verdict wording |
+|---|---|---|
+| `entailed` | the conjunct forces the answer | `SEPARATES, AND IT IS AN ARTIFACT. Not a finding.` |
+| `partial` | the conjunct bounds it without fixing it | `SEPARATES, PARTLY CONSTRAINED.` |
+| `independent` | the capture decision does not constrain it | `SEPARATES.` |
+
+Adding a row after seeing a result is what the table exists to make visible, so
+it is ordered by contamination and never by outcome.
+
+### The unit decides the answer
+
+Three units, `publisher` primary, declared before the run. On this cohort the
+unit is not a detail — it is the whole result. `two publications less than five
+minutes apart` reads **+63.8pp (CI +44.2 to +75.4)** at the capture unit and
+**+13.0pp (CI −27.3 to +60.6), inconclusive** at the publisher unit, because 36
+of the 87 case captures are one operator's release loop.
+
+The report prints the discrepancy itself, naming every endpoint that separates at
+the capture unit and not at the primary one, so a reader cannot pick the larger
+number without being told what it is.
+
+### The batch, and its base rate
+
+A **family** is several *distinct* names from one account inside 60 minutes. One
+name republishing is a **cadence** and is counted apart — `@siwatfa/yorn` is 149
+releases of one package, and a unit counting publications would call it the
+largest campaign in the corpus.
+
+The base rate is the result: a tight batch (≥3 names in ≤60 min) describes
+**58.9%** of the store's families, because that is what a monorepo release is.
+Only the conjunction with all-first-publication is rare, at 0.1%. Idea 4's naive
+form is saturated by ordinary practice the way opacity was by minification.
+
+The family results are **descriptive**. With 4 malicious families there is no case
+arm to test against a control arm, and none is claimed.
+
+### `--control-class`
+
+The same knob `capabilities --control` grew in D11: restrict the control pool to
+one capture reason so both arms come through one filter. Both readings agree here
+— nothing uncontaminated separates at the publisher unit either way.
+
+### Two things the record itself gets wrong
+
+`time.created` is reset by npm's takedown write, so a removed package reads as
+newborn (**D12**: 631 captures affected, 133 flipping the `young` conjunct). Every
+age in this run comes from the release timestamps instead.
+
+The takedown write also publishes as `npm` with `npm-support` as maintainer, so
+grouping by account attributes every removed package to the registry (**D13**).
+The guard is structural and sits in front of `publisherOf`, because after a
+takedown *both* halves of its fallback are the registry.
+
+---
+
+## `fp-bench --class-matched` — the arm that can see the observed class
+
+```
+node dist/fp-bench.js --class-matched
+node dist/fp-bench.js --class-matched --control-class=watcher-threshold --limit=500
+```
+
+The default arm harvests by keyword and ranks by weekly downloads. That is the
+right population for asking whether the gate is liveable in CI, and the wrong one
+for any signal restricted to the observed class: a popular package is not under
+seven days old, not under 100KB, and has a repository, so a class-gated signal
+scores **0.00% false positives there whatever it does**.
+
+Measured on shipped code — `fabricatedProfile`, which is not switched on:
+
+| arm | n | full conjunction |
+|---|---|---|
+| popularity-ranked (7 runs, v0.2.0 → v1.2.0) | 500 each | 0.00% |
+| `--class-matched` | 1,505 | **82.66%** |
+
+This arm is **offline**. It scores each package from its captured packument, not
+from the registry today, because the live document for a package this young has
+already changed and for a withdrawn one it is gone. One capture per package, so a
+republisher cannot decide the rate.
+
+It also prints a coverage fact the other arm cannot: **100% of the class returns
+`INSUFFICIENT_HISTORY` in gate mode** — the gate judges none of it.
+
+Read the rate as an **over-estimate**: "not withdrawn" is not "benign", so a
+package npm removes tomorrow counts here as a false positive today. A signal that
+looks clean in this arm is clean pessimistically. Results are written to
+`fp-bench-results/class-matched-v<engine>.json`, deliberately as a separate file
+from the popularity artifacts — the two arms measure different populations and
+comparing them as one series would be the defect in a new place.
+
+---
+
+## `norte-guard backfill-404` — the pass over what a terminal 404 cost
+
+```
+norte-guard backfill-404                 # dry run: how many, and how long it would take
+norte-guard backfill-404 --run           # replay them
+norte-guard backfill-404 --run --limit=200
+```
+
+The change feed announces a publication and the watcher fetches the packument
+about a second later. When that fetch failed, the publication was dropped and
+**nothing ever asked again**: 12,852 rows came back 404, and 6,892 of those
+packages were never analysed at all. Six were later removed by npm, among them
+two that share an operator with three packages already in the corpus.
+
+The window was never tight — `shared-slot-gate` 404ed at 09:30 and npm did not
+remove it until 16:19.
+
+Going forward this is handled by a queue inside `watch`: four attempts at **30s /
+5min / 30min / 2h**, persisted to `retry-queue.json` so a restart resumes it.
+The schedule deliberately spans past npm's 64-minute median time to remediation,
+because a schedule that gave up sooner would drop the packages most worth having.
+Anything still missing at the end is appended to `lost-publications.ndjson` with
+its reason.
+
+`backfill-404` is the one-time pass over the ones that were lost before the queue
+existed. **It is a replay, not a new capture rule**: each name goes through the
+same `analyzePackage` the watcher uses, so a package still on the registry is
+judged by the policy that would have judged it then. Capturing them
+unconditionally would add a population selected by "npm was briefly inconsistent"
+to a corpus otherwise selected by score or class, and nothing downstream could
+tell the two draws apart.
+
+Paced at 250ms per name. The dry run prints the estimate.
+
+---
+
+## Dependencies of what is captured
+
+`watch` now follows the dependencies a captured package declares. The reason is
+one package.
+
+On 2026-08-13 five packages were published in four minutes — 3-4KB each, no
+repository, hours old, the observed class exactly — and all five were captured.
+All five declare **one** dependency and it is the same one: `mutex-forge`, which
+was analysed twice while live, scored 10, and rejected for being 664KB with a
+repository.
+
+The class describes what a throwaway package looks like. A package built to be
+depended upon looks like a library instead, so the conjunction is calibrated for
+the decoy and lets the carrier through.
+
+The rule: **a dependency declared by a captured package, which is itself younger
+than `YOUNG_NAME_DAYS`, is captured — without consulting its size, repository,
+install script or score.** No new threshold; it reuses the conjunct already
+frozen in `observed-class.ts`, which `mutex-forge` satisfied.
+
+Measured before it was built: the median capture declares 1 dependency, the
+median declared dependency is 1,455 days old, and 1.8% are young. The rule
+reaches for about **163** packages across the whole corpus, not the 9,330
+distinct names that get declared. Fan-out is capped at 12 per capture (the
+corpus maximum is 519) and truncation is logged. Depth is one.
+
+These captures carry `captureReason: 'declared-dependency'`, so they can be
+counted apart from the score path and from quarantine — a different draw must
+not silently join either denominator.
+
+### What the dependency path does with the tarball
+
+**It keeps it**, unless one of two things is true — and in both cases the
+packument is still captured and the refusal recorded, so the package stays in
+every population and every denominator and only the bytes are declined.
+
+| condition | `tarballRefused.reason` |
+|---|---|
+| over the 8MB unpacked cap the score path also applies | `over-capture-cap` |
+| published under the **same npm scope** as the package that declared it | `same-scope-sibling` |
+
+Neither is a contradiction of the rule. The rule deliberately ignores a
+dependency's **size** and its **provenance** when deciding whether it is
+interesting; whether its tarball is worth the disk is a different question, and
+answering the second by the first is how `mutex-forge` was lost in the first
+place. `mutex-forge` is 664KB and unscoped, so it is unaffected by either.
+
+**Why degrade the same-scope sibling rather than exclude it.** Of the first 219
+captures on this path, **203 (92.7%)** were a package declaring another under its
+own scope — `@latticeag/adapter-stub` → `@latticeag/bus`,
+`@composy/layout-elements` → `@composy/layout-runtime`. That is a monorepo
+release, and all four carriers this rule was written for are cross-scope
+(`async-critical-section` → `mutex-forge`, `sui-gql-core` → `bcs-core`,
+`sui-move-rpc` → `leb128x`, `sui-move-graphql` → `ulebkit`).
+
+Excluding them would have removed the population from the denominator too, and
+the question *"does an operator ever use one scope for both the decoy and the
+carrier"* would stop being answerable. Degrading leaves it measurable.
+
+The disk argument is the weaker half and is stated as such: over the 219 captures
+already taken, the same-scope siblings are **0.66 MB of 0.74 MB — 88.7% of the
+path's disk and an absolutely trivial amount**. The saving matters at volume; the
+denominator matters now.
+
+Two unscoped names never match: they share no scope, they share nothing, and
+treating them as siblings would degrade the `mutex-forge` case itself.
+
+The rule is **not retroactive**. The 203 already on disk keep their tarballs;
+deleting bytes that were already fetched is the one thing this project has an
+incident about.
+
+### A failed dependency fetch is queued, not dropped
+
+The first version of this path let a `fetchPackument` failure end the matter, on
+the reasoning that the retry queue is for publications the *feed* announced and a
+name read out of a manifest is not one. That was wrong, and it was D15 in a new
+place: if `mutex-forge` had 404ed, the one package the five decoys all pointed at
+would have been lost for exactly the reason 6,892 publications were.
+
+Dependency fetches now enter the same queue, carrying `origin: 'dependency'` and
+the name of the package that declared them. The origin decides what a retry
+**does**: a `feed` entry is replayed through `analyzePackage`, a `dependency`
+entry goes back through the dependency path. Sending a dependency through the
+score path would reject it for precisely the reasons the rule exists to overrule
+— `mutex-forge` scored 10.
+
+### Depth
+
+One. Depth 2 was costed and not built.
+
+Simulated over the packuments already on disk: the 683 confirmable young
+dependencies at depth 1 declare 1,731 dependencies between them (811 distinct,
+mean 2.53 each), of which **206 — 25.4% — are themselves young**. Scaled to the
+~163 packages depth 1 reaches, depth 2 would cost about **412 extra packument
+requests for about 49 extra captures**.
+
+Cheap in absolute terms, and a different kind of draw. The 25.4% hit rate at
+depth 2 against **1.8%** at depth 1 is not a sign the rule is finding more
+malware; it is that new packages depend on new packages, so depth 2 pulls in
+monorepo siblings in bulk. The argument for capturing a dependency is that
+something already judged interesting points at it, and that argument does not
+survive a second hop.

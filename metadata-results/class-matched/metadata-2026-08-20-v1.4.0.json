@@ -1,0 +1,2410 @@
+{
+  "version": "1.4.0",
+  "since": "2026-08-13T05:17:19.760Z",
+  "until": "2026-08-20T16:59:49.546Z",
+  "controlCaptureReason": "quarantine-no-genome",
+  "capturesScanned": 24307,
+  "packumentsRead": 2373,
+  "caseProfiles": 87,
+  "caseProfilesWithoutBytes": 31,
+  "controlProfiles": 328,
+  "unmatchedCases": [],
+  "units": [
+    {
+      "unit": "capture",
+      "cases": 87,
+      "controls": 328,
+      "caseUnattributed": 0,
+      "endpoints": [
+        {
+          "key": "median_interval_minutes",
+          "label": "publishes faster than once an hour (median gap)",
+          "reads": "median minutes between consecutive publications",
+          "contamination": "independent",
+          "because": "A package under seven days old can publish twice or two hundred times. Nothing in young, tiny or !hasRepository decides the spacing.",
+          "cases": {
+            "successes": 64,
+            "n": 67,
+            "rate": 0.9552238805970149,
+            "low": 0.8228750452115057,
+            "high": 0.9898952415205826
+          },
+          "controls": {
+            "successes": 70,
+            "n": 128,
+            "rate": 0.546875,
+            "low": 0.4229670167059303,
+            "high": 0.6652345816457375
+          },
+          "caseHeldOut": 20,
+          "controlHeldOut": 200,
+          "difference": {
+            "a": {
+              "successes": 64,
+              "n": 67,
+              "rate": 0.9552238805970149,
+              "low": 0.8764196748946068,
+              "high": 0.9846563030618481
+            },
+            "b": {
+              "successes": 70,
+              "n": 128,
+              "rate": 0.546875,
+              "low": 0.46052480149159786,
+              "high": 0.6304935113929545
+            },
+            "difference": 0.4083488805970149,
+            "low": 0.2934482353248446,
+            "high": 0.49957729872749046,
+            "separated": true
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 64,
+              "n": 67,
+              "rate": 0.9552238805970149,
+              "low": 0.8228750452115057,
+              "high": 0.9898952415205826
+            },
+            "b": {
+              "successes": 70,
+              "n": 128,
+              "rate": 0.546875,
+              "low": 0.4229670167059303,
+              "high": 0.6652345816457375
+            },
+            "difference": 0.4083488805970149,
+            "low": 0.23079549483584555,
+            "high": 0.5370162486135239,
+            "separated": true
+          },
+          "verdict": "SEPARATES. +40.8pp (family-adjusted +23.1pp to +53.7pp, excludes zero), on an endpoint nothing in the capture decision constrains."
+        },
+        {
+          "key": "fastest_interval_minutes",
+          "label": "two publications less than five minutes apart",
+          "reads": "shortest gap between any two consecutive publications",
+          "contamination": "independent",
+          "because": "Same argument as the median, and the tail is where a scripted release loop shows.",
+          "cases": {
+            "successes": 59,
+            "n": 67,
+            "rate": 0.8805970149253731,
+            "low": 0.7259759072257302,
+            "high": 0.9535533488945404
+          },
+          "controls": {
+            "successes": 31,
+            "n": 128,
+            "rate": 0.2421875,
+            "low": 0.15211366536946974,
+            "high": 0.36277754369635745
+          },
+          "caseHeldOut": 20,
+          "controlHeldOut": 200,
+          "difference": {
+            "a": {
+              "successes": 59,
+              "n": 67,
+              "rate": 0.8805970149253731,
+              "low": 0.7816775692760262,
+              "high": 0.9382384122941246
+            },
+            "b": {
+              "successes": 31,
+              "n": 128,
+              "rate": 0.2421875,
+              "low": 0.1761863228611377,
+              "high": 0.3232129562738243
+            },
+            "difference": 0.6384095149253731,
+            "low": 0.5105416874942499,
+            "high": 0.7260376272771624,
+            "separated": true
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 59,
+              "n": 67,
+              "rate": 0.8805970149253731,
+              "low": 0.7259759072257302,
+              "high": 0.9535533488945404
+            },
+            "b": {
+              "successes": 31,
+              "n": 128,
+              "rate": 0.2421875,
+              "low": 0.15211366536946974,
+              "high": 0.36277754369635745
+            },
+            "difference": 0.6384095149253731,
+            "low": 0.44232370313636593,
+            "high": 0.7543229410298101,
+            "separated": true
+          },
+          "verdict": "SEPARATES. +63.8pp (family-adjusted +44.2pp to +75.4pp, excludes zero), on an endpoint nothing in the capture decision constrains."
+        },
+        {
+          "key": "publisher_is_declared_maintainer",
+          "label": "publisher is NOT a declared maintainer",
+          "reads": "the account that published the version appears in the maintainer list",
+          "contamination": "independent",
+          "because": "Maintainer membership is a registry fact about an account, unconstrained by the age, the size or the repository field of the package it published.",
+          "cases": {
+            "successes": 0,
+            "n": 87,
+            "rate": 0,
+            "low": 0,
+            "high": 0.08471110502517937
+          },
+          "controls": {
+            "successes": 0,
+            "n": 328,
+            "rate": 0,
+            "low": 0,
+            "high": 0.0239604504568601
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 87,
+              "rate": 0,
+              "low": 0,
+              "high": 0.04228899535014795
+            },
+            "b": {
+              "successes": 0,
+              "n": 328,
+              "rate": 0,
+              "low": 0,
+              "high": 0.01157660763448585
+            },
+            "difference": 0,
+            "low": -0.01157660763448585,
+            "high": 0.04228899535014795,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 87,
+              "rate": 0,
+              "low": 0,
+              "high": 0.08471110502517937
+            },
+            "b": {
+              "successes": 0,
+              "n": 328,
+              "rate": 0,
+              "low": 0,
+              "high": 0.0239604504568601
+            },
+            "difference": 0,
+            "low": -0.0239604504568601,
+            "high": 0.08471110502517937,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +0.0pp, family-adjusted -2.4pp to +8.5pp, over 87 cases and 328 controls."
+        },
+        {
+          "key": "multi_maintainer",
+          "label": "more than one maintainer listed",
+          "reads": "more than one account is listed as maintainer",
+          "contamination": "independent",
+          "because": "Not an input to the class, and it is the metadata form of \"somebody else is watching\".",
+          "cases": {
+            "successes": 0,
+            "n": 87,
+            "rate": 0,
+            "low": 0,
+            "high": 0.08471110502517937
+          },
+          "controls": {
+            "successes": 14,
+            "n": 328,
+            "rate": 0.042682926829268296,
+            "low": 0.020487508188592372,
+            "high": 0.08679339161951138
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 87,
+              "rate": 0,
+              "low": 0,
+              "high": 0.04228899535014795
+            },
+            "b": {
+              "successes": 14,
+              "n": 328,
+              "rate": 0.042682926829268296,
+              "low": 0.025592710691408192,
+              "high": 0.07036150360842644
+            },
+            "difference": -0.042682926829268296,
+            "low": -0.07036150360842644,
+            "high": 0.002928854711947662,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 87,
+              "rate": 0,
+              "low": 0,
+              "high": 0.08471110502517937
+            },
+            "b": {
+              "successes": 14,
+              "n": 328,
+              "rate": 0.042682926829268296,
+              "low": 0.020487508188592372,
+              "high": 0.08679339161951138
+            },
+            "difference": -0.042682926829268296,
+            "low": -0.08679339161951138,
+            "high": 0.04488766140229398,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. -4.3pp, family-adjusted -8.7pp to +4.5pp, over 87 cases and 328 controls."
+        },
+        {
+          "key": "dependency_churn",
+          "label": "added a dependency against the previous version",
+          "reads": "dependencies added or removed against the previous version",
+          "contamination": "independent",
+          "because": "Needs two versions, which young does not prevent, and the dependency list is not read by the capture filter at all.",
+          "cases": {
+            "successes": 6,
+            "n": 64,
+            "rate": 0.09375,
+            "low": 0.031652043162951615,
+            "high": 0.24664652487916827
+          },
+          "controls": {
+            "successes": 5,
+            "n": 127,
+            "rate": 0.03937007874015748,
+            "low": 0.011978020341090412,
+            "high": 0.1216887309601131
+          },
+          "caseHeldOut": 23,
+          "controlHeldOut": 201,
+          "difference": {
+            "a": {
+              "successes": 6,
+              "n": 64,
+              "rate": 0.09375,
+              "low": 0.04367765783128784,
+              "high": 0.1898309858327767
+            },
+            "b": {
+              "successes": 5,
+              "n": 127,
+              "rate": 0.03937007874015748,
+              "low": 0.01693154776967802,
+              "high": 0.08885743677346422
+            },
+            "difference": 0.05437992125984252,
+            "low": -0.01602063310855205,
+            "high": 0.15304624535632136,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 6,
+              "n": 64,
+              "rate": 0.09375,
+              "low": 0.031652043162951615,
+              "high": 0.24664652487916827
+            },
+            "b": {
+              "successes": 5,
+              "n": 127,
+              "rate": 0.03937007874015748,
+              "low": 0.011978020341090412,
+              "high": 0.1216887309601131
+            },
+            "difference": 0.05437992125984252,
+            "low": -0.048734174511036094,
+            "high": 0.2097107687546786,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +5.4pp, family-adjusted -4.9pp to +21.0pp, over 64 cases and 127 controls."
+        },
+        {
+          "key": "release_count",
+          "label": "more than ten authored releases",
+          "reads": "number of authored publications, placeholder excluded",
+          "contamination": "partial",
+          "because": "young caps it in practice. Reported because the cap is loose: 149 releases in five days is not something the conjunct forces.",
+          "cases": {
+            "successes": 56,
+            "n": 87,
+            "rate": 0.6436781609195402,
+            "low": 0.49158852601517805,
+            "high": 0.7714255242649428
+          },
+          "controls": {
+            "successes": 13,
+            "n": 328,
+            "rate": 0.039634146341463415,
+            "low": 0.018513718042407763,
+            "high": 0.08281572109775001
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 56,
+              "n": 87,
+              "rate": 0.6436781609195402,
+              "low": 0.5389300856293024,
+              "high": 0.7362742260516895
+            },
+            "b": {
+              "successes": 13,
+              "n": 328,
+              "rate": 0.039634146341463415,
+              "low": 0.0233061289795522,
+              "high": 0.06662111341561465
+            },
+            "difference": 0.6040440145780768,
+            "low": 0.49587537000456533,
+            "high": 0.6980686678820274,
+            "separated": true
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 56,
+              "n": 87,
+              "rate": 0.6436781609195402,
+              "low": 0.49158852601517805,
+              "high": 0.7714255242649428
+            },
+            "b": {
+              "successes": 13,
+              "n": 328,
+              "rate": 0.039634146341463415,
+              "low": 0.018513718042407763,
+              "high": 0.08281572109775001
+            },
+            "difference": 0.6040440145780768,
+            "low": 0.4459430802235482,
+            "high": 0.7335255241971643,
+            "separated": true
+          },
+          "verdict": "SEPARATES, PARTLY CONSTRAINED. +60.4pp (family-adjusted +44.6pp to +73.4pp). The class bounds this endpoint without fixing it, so some of the difference is the filter."
+        },
+        {
+          "key": "releases_per_day",
+          "label": "more than five releases a day",
+          "reads": "authored releases divided by the days between the first and the last",
+          "contamination": "partial",
+          "because": "young bounds the span this can be measured over — a seven-day-old package cannot show a slow year — so the denominator is squeezed on the case side by the filter.",
+          "cases": {
+            "successes": 66,
+            "n": 67,
+            "rate": 0.9850746268656716,
+            "low": 0.8675683583032456,
+            "high": 0.9984983406735699
+          },
+          "controls": {
+            "successes": 80,
+            "n": 128,
+            "rate": 0.625,
+            "low": 0.4995947899038946,
+            "high": 0.7356094723672195
+          },
+          "caseHeldOut": 20,
+          "controlHeldOut": 200,
+          "difference": {
+            "a": {
+              "successes": 66,
+              "n": 67,
+              "rate": 0.9850746268656716,
+              "low": 0.9201794802686531,
+              "high": 0.997360496242323
+            },
+            "b": {
+              "successes": 80,
+              "n": 128,
+              "rate": 0.625,
+              "low": 0.5386384433955553,
+              "high": 0.7040770576299176
+            },
+            "difference": 0.3600746268656716,
+            "low": 0.2577781895119992,
+            "high": 0.4473057053038225,
+            "separated": true
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 66,
+              "n": 67,
+              "rate": 0.9850746268656716,
+              "low": 0.8675683583032456,
+              "high": 0.9984983406735699
+            },
+            "b": {
+              "successes": 80,
+              "n": 128,
+              "rate": 0.625,
+              "low": 0.4995947899038946,
+              "high": 0.7356094723672195
+            },
+            "difference": 0.3600746268656716,
+            "low": 0.19869873483461364,
+            "high": 0.48619624599437095,
+            "separated": true
+          },
+          "verdict": "SEPARATES, PARTLY CONSTRAINED. +36.0pp (family-adjusted +19.9pp to +48.6pp). The class bounds this endpoint without fixing it, so some of the difference is the filter."
+        },
+        {
+          "key": "version_ahead_of_releases",
+          "label": "declared version claims more history than it has",
+          "reads": "declared semver implies more history than the package has releases",
+          "contamination": "partial",
+          "because": "young makes a low release count likely, so half of this ratio is downstream of the filter. The declared version is not.",
+          "cases": {
+            "successes": 10,
+            "n": 84,
+            "rate": 0.11904761904761904,
+            "low": 0.05096001143815153,
+            "high": 0.2537804567911133
+          },
+          "controls": {
+            "successes": 3,
+            "n": 118,
+            "rate": 0.025423728813559324,
+            "low": 0.005721444520202068,
+            "high": 0.10575604989416391
+          },
+          "caseHeldOut": 3,
+          "controlHeldOut": 210,
+          "difference": {
+            "a": {
+              "successes": 10,
+              "n": 84,
+              "rate": 0.11904761904761904,
+              "low": 0.06596478253651099,
+              "high": 0.2054510386689315
+            },
+            "b": {
+              "successes": 3,
+              "n": 118,
+              "rate": 0.025423728813559324,
+              "low": 0.00868335709742743,
+              "high": 0.07209036878929763
+            },
+            "difference": 0.09362389023405972,
+            "low": 0.022944594689394,
+            "high": 0.18163406559720094,
+            "separated": true
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 10,
+              "n": 84,
+              "rate": 0.11904761904761904,
+              "low": 0.05096001143815153,
+              "high": 0.2537804567911133
+            },
+            "b": {
+              "successes": 3,
+              "n": 118,
+              "rate": 0.025423728813559324,
+              "low": 0.005721444520202068,
+              "high": 0.10575604989416391
+            },
+            "difference": 0.09362389023405972,
+            "low": -0.011681399852327523,
+            "high": 0.2297896626322326,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +9.4pp, family-adjusted -1.2pp to +23.0pp, over 84 cases and 118 controls."
+        },
+        {
+          "key": "name_age_days",
+          "label": "name under seven days old (the young conjunct itself)",
+          "reads": "days between the first authored release and the capture",
+          "contamination": "entailed",
+          "because": "It IS the young conjunct, measured continuously. Against a class-matched control both arms are under seven days by construction. Present to make the entailment visible in the output rather than to test anything.",
+          "cases": {
+            "successes": 87,
+            "n": 87,
+            "rate": 1,
+            "low": 0.9152888949748206,
+            "high": 1
+          },
+          "controls": {
+            "successes": 327,
+            "n": 328,
+            "rate": 0.9969512195121951,
+            "low": 0.9703945305137364,
+            "high": 0.9996935583614578
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 87,
+              "n": 87,
+              "rate": 1,
+              "low": 0.957711004649852,
+              "high": 1
+            },
+            "b": {
+              "successes": 327,
+              "n": 328,
+              "rate": 0.9969512195121951,
+              "low": 0.9829347941101932,
+              "high": 0.9994616263506534
+            },
+            "difference": 0.0030487804878048808,
+            "low": -0.03931466212749037,
+            "high": 0.017065205889806756,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 87,
+              "n": 87,
+              "rate": 1,
+              "low": 0.9152888949748206,
+              "high": 1
+            },
+            "b": {
+              "successes": 327,
+              "n": 328,
+              "rate": 0.9969512195121951,
+              "low": 0.9703945305137364,
+              "high": 0.9996935583614578
+            },
+            "difference": 0.0030487804878048808,
+            "low": -0.08170670155879287,
+            "high": 0.029605469486263636,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +0.3pp, family-adjusted -8.2pp to +3.0pp, over 87 cases and 328 controls."
+        },
+        {
+          "key": "has_provenance",
+          "label": "has npm provenance",
+          "reads": "npm attestations or a trusted publisher on the captured version",
+          "contamination": "entailed",
+          "because": "Trusted publishing needs a GitHub repository and a workflow, and !hasRepository is a conjunct. Measured at full size in D11: 0/10 cases against 0/950 class-matched controls, exactly 0.0pp, against −44.7pp on the raw pool.",
+          "cases": {
+            "successes": 0,
+            "n": 87,
+            "rate": 0,
+            "low": 0,
+            "high": 0.08471110502517937
+          },
+          "controls": {
+            "successes": 0,
+            "n": 328,
+            "rate": 0,
+            "low": 0,
+            "high": 0.0239604504568601
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 87,
+              "rate": 0,
+              "low": 0,
+              "high": 0.04228899535014795
+            },
+            "b": {
+              "successes": 0,
+              "n": 328,
+              "rate": 0,
+              "low": 0,
+              "high": 0.01157660763448585
+            },
+            "difference": 0,
+            "low": -0.01157660763448585,
+            "high": 0.04228899535014795,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 87,
+              "rate": 0,
+              "low": 0,
+              "high": 0.08471110502517937
+            },
+            "b": {
+              "successes": 0,
+              "n": 328,
+              "rate": 0,
+              "low": 0,
+              "high": 0.0239604504568601
+            },
+            "difference": 0,
+            "low": -0.0239604504568601,
+            "high": 0.08471110502517937,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +0.0pp, family-adjusted -2.4pp to +8.5pp, over 87 cases and 328 controls."
+        },
+        {
+          "key": "provenance_lost",
+          "label": "lost provenance it previously had",
+          "reads": "a previous version was signed and the captured one is not",
+          "contamination": "entailed",
+          "because": "Requires a signed predecessor, which requires the repository the conjunct excludes. Cannot fire on either arm of a class-matched comparison, and a 0-versus-0 is not a result.",
+          "cases": {
+            "successes": 0,
+            "n": 87,
+            "rate": 0,
+            "low": 0,
+            "high": 0.08471110502517937
+          },
+          "controls": {
+            "successes": 0,
+            "n": 328,
+            "rate": 0,
+            "low": 0,
+            "high": 0.0239604504568601
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 87,
+              "rate": 0,
+              "low": 0,
+              "high": 0.04228899535014795
+            },
+            "b": {
+              "successes": 0,
+              "n": 328,
+              "rate": 0,
+              "low": 0,
+              "high": 0.01157660763448585
+            },
+            "difference": 0,
+            "low": -0.01157660763448585,
+            "high": 0.04228899535014795,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 87,
+              "rate": 0,
+              "low": 0,
+              "high": 0.08471110502517937
+            },
+            "b": {
+              "successes": 0,
+              "n": 328,
+              "rate": 0,
+              "low": 0,
+              "high": 0.0239604504568601
+            },
+            "difference": 0,
+            "low": -0.0239604504568601,
+            "high": 0.08471110502517937,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +0.0pp, family-adjusted -2.4pp to +8.5pp, over 87 cases and 328 controls."
+        }
+      ]
+    },
+    {
+      "unit": "package",
+      "cases": 26,
+      "controls": 250,
+      "caseUnattributed": 0,
+      "endpoints": [
+        {
+          "key": "median_interval_minutes",
+          "label": "publishes faster than once an hour (median gap)",
+          "reads": "median minutes between consecutive publications",
+          "contamination": "independent",
+          "because": "A package under seven days old can publish twice or two hundred times. Nothing in young, tiny or !hasRepository decides the spacing.",
+          "cases": {
+            "successes": 5,
+            "n": 7,
+            "rate": 0.7142857142857143,
+            "low": 0.2499227496623166,
+            "high": 0.9493868915860644
+          },
+          "controls": {
+            "successes": 23,
+            "n": 50,
+            "rate": 0.46,
+            "low": 0.2798480684744308,
+            "high": 0.6512481381224887
+          },
+          "caseHeldOut": 19,
+          "controlHeldOut": 200,
+          "difference": {
+            "a": {
+              "successes": 5,
+              "n": 7,
+              "rate": 0.7142857142857143,
+              "low": 0.35892909014821267,
+              "high": 0.9177828342909844
+            },
+            "b": {
+              "successes": 23,
+              "n": 50,
+              "rate": 0.46,
+              "low": 0.3296943460178263,
+              "high": 0.5960136567161192
+            },
+            "difference": 0.2542857142857143,
+            "low": -0.1262113883730207,
+            "high": 0.4959272697147449,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 5,
+              "n": 7,
+              "rate": 0.7142857142857143,
+              "low": 0.2499227496623166,
+              "high": 0.9493868915860644
+            },
+            "b": {
+              "successes": 23,
+              "n": 50,
+              "rate": 0.46,
+              "low": 0.2798480684744308,
+              "high": 0.6512481381224887
+            },
+            "difference": 0.2542857142857143,
+            "low": -0.24791824154214398,
+            "high": 0.550473630987939,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +25.4pp, family-adjusted -24.8pp to +55.0pp, over 7 cases and 50 controls."
+        },
+        {
+          "key": "fastest_interval_minutes",
+          "label": "two publications less than five minutes apart",
+          "reads": "shortest gap between any two consecutive publications",
+          "contamination": "independent",
+          "because": "Same argument as the median, and the tail is where a scripted release loop shows.",
+          "cases": {
+            "successes": 3,
+            "n": 7,
+            "rate": 0.42857142857142855,
+            "low": 0.10282189010602338,
+            "high": 0.8307415628111827
+          },
+          "controls": {
+            "successes": 10,
+            "n": 50,
+            "rate": 0.2,
+            "low": 0.08693734531964681,
+            "high": 0.3962842041572498
+          },
+          "caseHeldOut": 19,
+          "controlHeldOut": 200,
+          "difference": {
+            "a": {
+              "successes": 3,
+              "n": 7,
+              "rate": 0.42857142857142855,
+              "low": 0.15821692226262685,
+              "high": 0.7495457695909742
+            },
+            "b": {
+              "successes": 10,
+              "n": 50,
+              "rate": 0.2,
+              "low": 0.11243629945973886,
+              "high": 0.3303737210448524
+            },
+            "difference": 0.22857142857142854,
+            "low": -0.07157664525307045,
+            "high": 0.5612753949518072,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 3,
+              "n": 7,
+              "rate": 0.42857142857142855,
+              "low": 0.10282189010602338,
+              "high": 0.8307415628111827
+            },
+            "b": {
+              "successes": 10,
+              "n": 50,
+              "rate": 0.2,
+              "low": 0.08693734531964681,
+              "high": 0.3962842041572498
+            },
+            "difference": 0.22857142857142854,
+            "low": -0.1517445592756108,
+            "high": 0.6463321025916033,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +22.9pp, family-adjusted -15.2pp to +64.6pp, over 7 cases and 50 controls."
+        },
+        {
+          "key": "publisher_is_declared_maintainer",
+          "label": "publisher is NOT a declared maintainer",
+          "reads": "the account that published the version appears in the maintainer list",
+          "contamination": "independent",
+          "because": "Maintainer membership is a registry fact about an account, unconstrained by the age, the size or the repository field of the package it published.",
+          "cases": {
+            "successes": 0,
+            "n": 26,
+            "rate": 0,
+            "low": 1.3877787807814457e-17,
+            "high": 0.2364609008021673
+          },
+          "controls": {
+            "successes": 0,
+            "n": 250,
+            "rate": 0,
+            "low": 0,
+            "high": 0.03120284909163129
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 26,
+              "rate": 0,
+              "low": 1.3877787807814457e-17,
+              "high": 0.12873304380462175
+            },
+            "b": {
+              "successes": 0,
+              "n": 250,
+              "rate": 0,
+              "low": 0,
+              "high": 0.015133847249623387
+            },
+            "difference": 0,
+            "low": -0.015133847249623387,
+            "high": 0.12873304380462175,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 26,
+              "rate": 0,
+              "low": 1.3877787807814457e-17,
+              "high": 0.2364609008021673
+            },
+            "b": {
+              "successes": 0,
+              "n": 250,
+              "rate": 0,
+              "low": 0,
+              "high": 0.03120284909163129
+            },
+            "difference": 0,
+            "low": -0.03120284909163129,
+            "high": 0.2364609008021673,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +0.0pp, family-adjusted -3.1pp to +23.6pp, over 26 cases and 250 controls."
+        },
+        {
+          "key": "multi_maintainer",
+          "label": "more than one maintainer listed",
+          "reads": "more than one account is listed as maintainer",
+          "contamination": "independent",
+          "because": "Not an input to the class, and it is the metadata form of \"somebody else is watching\".",
+          "cases": {
+            "successes": 0,
+            "n": 26,
+            "rate": 0,
+            "low": 1.3877787807814457e-17,
+            "high": 0.2364609008021673
+          },
+          "controls": {
+            "successes": 12,
+            "n": 250,
+            "rate": 0.048,
+            "low": 0.021795383417333634,
+            "high": 0.10241199216150107
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 26,
+              "rate": 0,
+              "low": 1.3877787807814457e-17,
+              "high": 0.12873304380462175
+            },
+            "b": {
+              "successes": 12,
+              "n": 250,
+              "rate": 0.048,
+              "low": 0.02766792620603601,
+              "high": 0.08201307170762354
+            },
+            "difference": -0.048,
+            "low": -0.08201307170762354,
+            "high": 0.08232877576332041,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 26,
+              "rate": 0,
+              "low": 1.3877787807814457e-17,
+              "high": 0.2364609008021673
+            },
+            "b": {
+              "successes": 12,
+              "n": 250,
+              "rate": 0.048,
+              "low": 0.021795383417333634,
+              "high": 0.10241199216150107
+            },
+            "difference": -0.048,
+            "low": -0.10241199216150107,
+            "high": 0.18990846882449763,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. -4.8pp, family-adjusted -10.2pp to +19.0pp, over 26 cases and 250 controls."
+        },
+        {
+          "key": "dependency_churn",
+          "label": "added a dependency against the previous version",
+          "reads": "dependencies added or removed against the previous version",
+          "contamination": "independent",
+          "because": "Needs two versions, which young does not prevent, and the dependency list is not read by the capture filter at all.",
+          "cases": {
+            "successes": 1,
+            "n": 7,
+            "rate": 0.14285714285714285,
+            "low": 0.01452791994136099,
+            "high": 0.6532893446446706
+          },
+          "controls": {
+            "successes": 1,
+            "n": 49,
+            "rate": 0.02040816326530612,
+            "low": 0.002054218235339772,
+            "high": 0.17413529233675715
+          },
+          "caseHeldOut": 19,
+          "controlHeldOut": 201,
+          "difference": {
+            "a": {
+              "successes": 1,
+              "n": 7,
+              "rate": 0.14285714285714285,
+              "low": 0.02567895594897482,
+              "high": 0.5131345033190299
+            },
+            "b": {
+              "successes": 1,
+              "n": 49,
+              "rate": 0.02040816326530612,
+              "low": 0.003611579538530696,
+              "high": 0.10693768467754147
+            },
+            "difference": 0.12244897959183673,
+            "low": -0.023215311031898694,
+            "high": 0.4931071089988589,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 1,
+              "n": 7,
+              "rate": 0.14285714285714285,
+              "low": 0.01452791994136099,
+              "high": 0.6532893446446706
+            },
+            "b": {
+              "successes": 1,
+              "n": 49,
+              "rate": 0.02040816326530612,
+              "low": 0.002054218235339772,
+              "high": 0.17413529233675715
+            },
+            "difference": 0.12244897959183673,
+            "low": -0.07780191220822241,
+            "high": 0.6332110571972778,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +12.2pp, family-adjusted -7.8pp to +63.3pp, over 7 cases and 49 controls."
+        },
+        {
+          "key": "release_count",
+          "label": "more than ten authored releases",
+          "reads": "number of authored publications, placeholder excluded",
+          "contamination": "partial",
+          "because": "young caps it in practice. Reported because the cap is loose: 149 releases in five days is not something the conjunct forces.",
+          "cases": {
+            "successes": 1,
+            "n": 26,
+            "rate": 0.038461538461538464,
+            "low": 0.003877198554396999,
+            "high": 0.2913174791091421
+          },
+          "controls": {
+            "successes": 2,
+            "n": 250,
+            "rate": 0.008,
+            "low": 0.0013676340986742107,
+            "high": 0.045335969407490975
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 1,
+              "n": 26,
+              "rate": 0.038461538461538464,
+              "low": 0.0068218089769898765,
+              "high": 0.18893176991958405
+            },
+            "b": {
+              "successes": 2,
+              "n": 250,
+              "rate": 0.008,
+              "low": 0.0021965911168378306,
+              "high": 0.028695114576791587
+            },
+            "difference": 0.030461538461538464,
+            "low": -0.007345342515367642,
+            "high": 0.18104364267615947,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 1,
+              "n": 26,
+              "rate": 0.038461538461538464,
+              "low": 0.003877198554396999,
+              "high": 0.2913174791091421
+            },
+            "b": {
+              "successes": 2,
+              "n": 250,
+              "rate": 0.008,
+              "low": 0.0013676340986742107,
+              "high": 0.045335969407490975
+            },
+            "difference": 0.030461538461538464,
+            "low": -0.02043100694945272,
+            "high": 0.28340444703624734,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +3.0pp, family-adjusted -2.0pp to +28.3pp, over 26 cases and 250 controls."
+        },
+        {
+          "key": "releases_per_day",
+          "label": "more than five releases a day",
+          "reads": "authored releases divided by the days between the first and the last",
+          "contamination": "partial",
+          "because": "young bounds the span this can be measured over — a seven-day-old package cannot show a slow year — so the denominator is squeezed on the case side by the filter.",
+          "cases": {
+            "successes": 6,
+            "n": 7,
+            "rate": 0.8571428571428571,
+            "low": 0.3467106553553293,
+            "high": 0.9854720800586388
+          },
+          "controls": {
+            "successes": 28,
+            "n": 50,
+            "rate": 0.56,
+            "low": 0.36662224642993546,
+            "high": 0.7367334436746854
+          },
+          "caseHeldOut": 19,
+          "controlHeldOut": 200,
+          "difference": {
+            "a": {
+              "successes": 6,
+              "n": 7,
+              "rate": 0.8571428571428571,
+              "low": 0.4868654966809701,
+              "high": 0.9743210440510252
+            },
+            "b": {
+              "successes": 28,
+              "n": 50,
+              "rate": 0.56,
+              "low": 0.4230578680014353,
+              "high": 0.6883801278976466
+            },
+            "difference": 0.29714285714285704,
+            "low": -0.09475863674258128,
+            "high": 0.47737569267345037,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 6,
+              "n": 7,
+              "rate": 0.8571428571428571,
+              "low": 0.3467106553553293,
+              "high": 0.9854720800586388
+            },
+            "b": {
+              "successes": 28,
+              "n": 50,
+              "rate": 0.56,
+              "low": 0.36662224642993546,
+              "high": 0.7367334436746854
+            },
+            "difference": 0.29714285714285704,
+            "low": -0.24301984310103864,
+            "high": 0.5292276369755144,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +29.7pp, family-adjusted -24.3pp to +52.9pp, over 7 cases and 50 controls."
+        },
+        {
+          "key": "version_ahead_of_releases",
+          "label": "declared version claims more history than it has",
+          "reads": "declared semver implies more history than the package has releases",
+          "contamination": "partial",
+          "because": "young makes a low release count likely, so half of this ratio is downstream of the filter. The declared version is not.",
+          "cases": {
+            "successes": 10,
+            "n": 24,
+            "rate": 0.4166666666666667,
+            "low": 0.18961412894205706,
+            "high": 0.6855884961653743
+          },
+          "controls": {
+            "successes": 3,
+            "n": 76,
+            "rate": 0.039473684210526314,
+            "low": 0.008901305976168256,
+            "high": 0.1582804810492326
+          },
+          "caseHeldOut": 2,
+          "controlHeldOut": 174,
+          "difference": {
+            "a": {
+              "successes": 10,
+              "n": 24,
+              "rate": 0.4166666666666667,
+              "low": 0.24467347246538232,
+              "high": 0.6116566235061137
+            },
+            "b": {
+              "successes": 3,
+              "n": 76,
+              "rate": 0.039473684210526314,
+              "low": 0.013514390129808602,
+              "high": 0.10974967271462335
+            },
+            "difference": 0.37719298245614036,
+            "low": 0.19139639095944821,
+            "high": 0.5739033487753016,
+            "separated": true
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 10,
+              "n": 24,
+              "rate": 0.4166666666666667,
+              "low": 0.18961412894205706,
+              "high": 0.6855884961653743
+            },
+            "b": {
+              "successes": 3,
+              "n": 76,
+              "rate": 0.039473684210526314,
+              "low": 0.008901305976168256,
+              "high": 0.1582804810492326
+            },
+            "difference": 0.37719298245614036,
+            "low": 0.12093547551778955,
+            "high": 0.6478470433749388,
+            "separated": true
+          },
+          "verdict": "SEPARATES, PARTLY CONSTRAINED. +37.7pp (family-adjusted +12.1pp to +64.8pp). The class bounds this endpoint without fixing it, so some of the difference is the filter."
+        },
+        {
+          "key": "name_age_days",
+          "label": "name under seven days old (the young conjunct itself)",
+          "reads": "days between the first authored release and the capture",
+          "contamination": "entailed",
+          "because": "It IS the young conjunct, measured continuously. Against a class-matched control both arms are under seven days by construction. Present to make the entailment visible in the output rather than to test anything.",
+          "cases": {
+            "successes": 26,
+            "n": 26,
+            "rate": 1,
+            "low": 0.7635390991978327,
+            "high": 0.9999999999999999
+          },
+          "controls": {
+            "successes": 249,
+            "n": 250,
+            "rate": 0.996,
+            "low": 0.9614488565717009,
+            "high": 0.9995979171294006
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 26,
+              "n": 26,
+              "rate": 1,
+              "low": 0.8712669561953784,
+              "high": 1
+            },
+            "b": {
+              "successes": 249,
+              "n": 250,
+              "rate": 0.996,
+              "low": 0.977693652885133,
+              "high": 0.9992935706432406
+            },
+            "difference": 0.0040000000000000036,
+            "low": -0.12477516909243269,
+            "high": 0.02230634711486701,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 26,
+              "n": 26,
+              "rate": 1,
+              "low": 0.7635390991978327,
+              "high": 0.9999999999999999
+            },
+            "b": {
+              "successes": 249,
+              "n": 250,
+              "rate": 0.996,
+              "low": 0.9614488565717009,
+              "high": 0.9995979171294006
+            },
+            "difference": 0.0040000000000000036,
+            "low": -0.23248827162428676,
+            "high": 0.03855114342829913,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +0.4pp, family-adjusted -23.2pp to +3.9pp, over 26 cases and 250 controls."
+        },
+        {
+          "key": "has_provenance",
+          "label": "has npm provenance",
+          "reads": "npm attestations or a trusted publisher on the captured version",
+          "contamination": "entailed",
+          "because": "Trusted publishing needs a GitHub repository and a workflow, and !hasRepository is a conjunct. Measured at full size in D11: 0/10 cases against 0/950 class-matched controls, exactly 0.0pp, against −44.7pp on the raw pool.",
+          "cases": {
+            "successes": 0,
+            "n": 26,
+            "rate": 0,
+            "low": 1.3877787807814457e-17,
+            "high": 0.2364609008021673
+          },
+          "controls": {
+            "successes": 0,
+            "n": 250,
+            "rate": 0,
+            "low": 0,
+            "high": 0.03120284909163129
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 26,
+              "rate": 0,
+              "low": 1.3877787807814457e-17,
+              "high": 0.12873304380462175
+            },
+            "b": {
+              "successes": 0,
+              "n": 250,
+              "rate": 0,
+              "low": 0,
+              "high": 0.015133847249623387
+            },
+            "difference": 0,
+            "low": -0.015133847249623387,
+            "high": 0.12873304380462175,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 26,
+              "rate": 0,
+              "low": 1.3877787807814457e-17,
+              "high": 0.2364609008021673
+            },
+            "b": {
+              "successes": 0,
+              "n": 250,
+              "rate": 0,
+              "low": 0,
+              "high": 0.03120284909163129
+            },
+            "difference": 0,
+            "low": -0.03120284909163129,
+            "high": 0.2364609008021673,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +0.0pp, family-adjusted -3.1pp to +23.6pp, over 26 cases and 250 controls."
+        },
+        {
+          "key": "provenance_lost",
+          "label": "lost provenance it previously had",
+          "reads": "a previous version was signed and the captured one is not",
+          "contamination": "entailed",
+          "because": "Requires a signed predecessor, which requires the repository the conjunct excludes. Cannot fire on either arm of a class-matched comparison, and a 0-versus-0 is not a result.",
+          "cases": {
+            "successes": 0,
+            "n": 26,
+            "rate": 0,
+            "low": 1.3877787807814457e-17,
+            "high": 0.2364609008021673
+          },
+          "controls": {
+            "successes": 0,
+            "n": 250,
+            "rate": 0,
+            "low": 0,
+            "high": 0.03120284909163129
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 26,
+              "rate": 0,
+              "low": 1.3877787807814457e-17,
+              "high": 0.12873304380462175
+            },
+            "b": {
+              "successes": 0,
+              "n": 250,
+              "rate": 0,
+              "low": 0,
+              "high": 0.015133847249623387
+            },
+            "difference": 0,
+            "low": -0.015133847249623387,
+            "high": 0.12873304380462175,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 26,
+              "rate": 0,
+              "low": 1.3877787807814457e-17,
+              "high": 0.2364609008021673
+            },
+            "b": {
+              "successes": 0,
+              "n": 250,
+              "rate": 0,
+              "low": 0,
+              "high": 0.03120284909163129
+            },
+            "difference": 0,
+            "low": -0.03120284909163129,
+            "high": 0.2364609008021673,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +0.0pp, family-adjusted -3.1pp to +23.6pp, over 26 cases and 250 controls."
+        }
+      ]
+    },
+    {
+      "unit": "publisher",
+      "cases": 10,
+      "controls": 152,
+      "caseUnattributed": 0,
+      "endpoints": [
+        {
+          "key": "median_interval_minutes",
+          "label": "publishes faster than once an hour (median gap)",
+          "reads": "median minutes between consecutive publications",
+          "contamination": "independent",
+          "because": "A package under seven days old can publish twice or two hundred times. Nothing in young, tiny or !hasRepository decides the spacing.",
+          "cases": {
+            "successes": 4,
+            "n": 5,
+            "rate": 0.8,
+            "low": 0.25028966038412875,
+            "high": 0.9795609415373869
+          },
+          "controls": {
+            "successes": 18,
+            "n": 37,
+            "rate": 0.4864864864864865,
+            "low": 0.2775851228378686,
+            "high": 0.7002182827571882
+          },
+          "caseHeldOut": 5,
+          "controlHeldOut": 115,
+          "difference": {
+            "a": {
+              "successes": 4,
+              "n": 5,
+              "rate": 0.8,
+              "low": 0.3755282641185388,
+              "high": 0.9637768390302125
+            },
+            "b": {
+              "successes": 18,
+              "n": 37,
+              "rate": 0.4864864864864865,
+              "low": 0.33446153327211037,
+              "high": 0.6410536277401908
+            },
+            "difference": 0.31351351351351353,
+            "low": -0.13822452530717683,
+            "high": 0.5369736652241963,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 4,
+              "n": 5,
+              "rate": 0.8,
+              "low": 0.25028966038412875,
+              "high": 0.9795609415373869
+            },
+            "b": {
+              "successes": 18,
+              "n": 37,
+              "rate": 0.4864864864864865,
+              "low": 0.2775851228378686,
+              "high": 0.7002182827571882
+            },
+            "difference": 0.31351351351351353,
+            "low": -0.2762853829060181,
+            "high": 0.5889802292162368,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +31.4pp, family-adjusted -27.6pp to +58.9pp, over 5 cases and 37 controls."
+        },
+        {
+          "key": "fastest_interval_minutes",
+          "label": "two publications less than five minutes apart",
+          "reads": "shortest gap between any two consecutive publications",
+          "contamination": "independent",
+          "because": "Same argument as the median, and the tail is where a scripted release loop shows.",
+          "cases": {
+            "successes": 2,
+            "n": 5,
+            "rate": 0.4,
+            "low": 0.07199218401476631,
+            "high": 0.851390948678062
+          },
+          "controls": {
+            "successes": 10,
+            "n": 37,
+            "rate": 0.2702702702702703,
+            "low": 0.1191443542667266,
+            "high": 0.5035135408492393
+          },
+          "caseHeldOut": 5,
+          "controlHeldOut": 115,
+          "difference": {
+            "a": {
+              "successes": 2,
+              "n": 5,
+              "rate": 0.4,
+              "low": 0.1176182311592533,
+              "high": 0.769280067791163
+            },
+            "b": {
+              "successes": 10,
+              "n": 37,
+              "rate": 0.2702702702702703,
+              "low": 0.15397298246990687,
+              "high": 0.4297847547392133
+            },
+            "difference": 0.12972972972972974,
+            "low": -0.1945916142009798,
+            "high": 0.5168896806770953,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 2,
+              "n": 5,
+              "rate": 0.4,
+              "low": 0.07199218401476631,
+              "high": 0.851390948678062
+            },
+            "b": {
+              "successes": 10,
+              "n": 37,
+              "rate": 0.2702702702702703,
+              "low": 0.1191443542667266,
+              "high": 0.5035135408492393
+            },
+            "difference": 0.12972972972972974,
+            "low": -0.2727520097539108,
+            "high": 0.6057474090614862,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +13.0pp, family-adjusted -27.3pp to +60.6pp, over 5 cases and 37 controls."
+        },
+        {
+          "key": "publisher_is_declared_maintainer",
+          "label": "publisher is NOT a declared maintainer",
+          "reads": "the account that published the version appears in the maintainer list",
+          "contamination": "independent",
+          "because": "Maintainer membership is a registry fact about an account, unconstrained by the age, the size or the repository field of the package it published.",
+          "cases": {
+            "successes": 0,
+            "n": 10,
+            "rate": 0,
+            "low": 5.551115123125783e-17,
+            "high": 0.44604341699747535
+          },
+          "controls": {
+            "successes": 0,
+            "n": 152,
+            "rate": 0,
+            "low": 3.469446951953614e-18,
+            "high": 0.050308390083768445
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 10,
+              "rate": 0,
+              "low": 0,
+              "high": 0.2775401687666166
+            },
+            "b": {
+              "successes": 0,
+              "n": 152,
+              "rate": 0,
+              "low": 0,
+              "high": 0.024650670937670042
+            },
+            "difference": 0,
+            "low": -0.024650670937670042,
+            "high": 0.2775401687666166,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 10,
+              "rate": 0,
+              "low": 5.551115123125783e-17,
+              "high": 0.44604341699747535
+            },
+            "b": {
+              "successes": 0,
+              "n": 152,
+              "rate": 0,
+              "low": 3.469446951953614e-18,
+              "high": 0.050308390083768445
+            },
+            "difference": 0,
+            "low": -0.050308390083768445,
+            "high": 0.44604341699747535,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +0.0pp, family-adjusted -5.0pp to +44.6pp, over 10 cases and 152 controls."
+        },
+        {
+          "key": "multi_maintainer",
+          "label": "more than one maintainer listed",
+          "reads": "more than one account is listed as maintainer",
+          "contamination": "independent",
+          "because": "Not an input to the class, and it is the metadata form of \"somebody else is watching\".",
+          "cases": {
+            "successes": 0,
+            "n": 10,
+            "rate": 0,
+            "low": 5.551115123125783e-17,
+            "high": 0.44604341699747535
+          },
+          "controls": {
+            "successes": 6,
+            "n": 152,
+            "rate": 0.039473684210526314,
+            "low": 0.013202763505927528,
+            "high": 0.11208127999228024
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 10,
+              "rate": 0,
+              "low": 0,
+              "high": 0.2775401687666166
+            },
+            "b": {
+              "successes": 6,
+              "n": 152,
+              "rate": 0.039473684210526314,
+              "low": 0.018214356323955287,
+              "high": 0.08343757743442501
+            },
+            "difference": -0.039473684210526314,
+            "low": -0.08343757743442501,
+            "high": 0.23887951641987915,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 10,
+              "rate": 0,
+              "low": 5.551115123125783e-17,
+              "high": 0.44604341699747535
+            },
+            "b": {
+              "successes": 6,
+              "n": 152,
+              "rate": 0.039473684210526314,
+              "low": 0.013202763505927528,
+              "high": 0.11208127999228024
+            },
+            "difference": -0.039473684210526314,
+            "low": -0.11208127999228024,
+            "high": 0.4073427111035344,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. -3.9pp, family-adjusted -11.2pp to +40.7pp, over 10 cases and 152 controls."
+        },
+        {
+          "key": "dependency_churn",
+          "label": "added a dependency against the previous version",
+          "reads": "dependencies added or removed against the previous version",
+          "contamination": "independent",
+          "because": "Needs two versions, which young does not prevent, and the dependency list is not read by the capture filter at all.",
+          "cases": {
+            "successes": 1,
+            "n": 5,
+            "rate": 0.2,
+            "low": 0.020439058462613235,
+            "high": 0.7497103396158713
+          },
+          "controls": {
+            "successes": 1,
+            "n": 36,
+            "rate": 0.027777777777777776,
+            "low": 0.002797722432570038,
+            "high": 0.2253863834421746
+          },
+          "caseHeldOut": 5,
+          "controlHeldOut": 116,
+          "difference": {
+            "a": {
+              "successes": 1,
+              "n": 5,
+              "rate": 0.2,
+              "low": 0.03622316096978745,
+              "high": 0.6244717358814613
+            },
+            "b": {
+              "successes": 1,
+              "n": 36,
+              "rate": 0.027777777777777776,
+              "low": 0.004920280295569679,
+              "high": 0.141700337350308
+            },
+            "difference": 0.17222222222222222,
+            "low": -0.027280165187765576,
+            "high": 0.5973089424962978,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 1,
+              "n": 5,
+              "rate": 0.2,
+              "low": 0.020439058462613235,
+              "high": 0.7497103396158713
+            },
+            "b": {
+              "successes": 1,
+              "n": 36,
+              "rate": 0.027777777777777776,
+              "low": 0.002797722432570038,
+              "high": 0.2253863834421746
+            },
+            "difference": 0.17222222222222222,
+            "low": -0.09478207129835003,
+            "high": 0.7224998436513026,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +17.2pp, family-adjusted -9.5pp to +72.2pp, over 5 cases and 36 controls."
+        },
+        {
+          "key": "release_count",
+          "label": "more than ten authored releases",
+          "reads": "number of authored publications, placeholder excluded",
+          "contamination": "partial",
+          "because": "young caps it in practice. Reported because the cap is loose: 149 releases in five days is not something the conjunct forces.",
+          "cases": {
+            "successes": 1,
+            "n": 10,
+            "rate": 0.1,
+            "low": 0.010132696522699214,
+            "high": 0.5467020370752812
+          },
+          "controls": {
+            "successes": 2,
+            "n": 152,
+            "rate": 0.013157894736842105,
+            "low": 0.0022508075601221783,
+            "high": 0.07304946699512604
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 1,
+              "n": 10,
+              "rate": 0.1,
+              "low": 0.01787574951572113,
+              "high": 0.4041563854975721
+            },
+            "b": {
+              "successes": 2,
+              "n": 152,
+              "rate": 0.013157894736842105,
+              "low": 0.0036157414374440727,
+              "high": 0.04670201710712938
+            },
+            "difference": 0.0868421052631579,
+            "low": -0.0018686644505436362,
+            "high": 0.39114813466207876,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 1,
+              "n": 10,
+              "rate": 0.1,
+              "low": 0.010132696522699214,
+              "high": 0.5467020370752812
+            },
+            "b": {
+              "successes": 2,
+              "n": 152,
+              "rate": 0.013157894736842105,
+              "low": 0.0022508075601221783,
+              "high": 0.07304946699512604
+            },
+            "difference": 0.0868421052631579,
+            "low": -0.021153879207796045,
+            "high": 0.5336772812261593,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +8.7pp, family-adjusted -2.1pp to +53.4pp, over 10 cases and 152 controls."
+        },
+        {
+          "key": "releases_per_day",
+          "label": "more than five releases a day",
+          "reads": "authored releases divided by the days between the first and the last",
+          "contamination": "partial",
+          "because": "young bounds the span this can be measured over — a seven-day-old package cannot show a slow year — so the denominator is squeezed on the case side by the filter.",
+          "cases": {
+            "successes": 5,
+            "n": 5,
+            "rate": 1,
+            "low": 0.3830843365358592,
+            "high": 1
+          },
+          "controls": {
+            "successes": 21,
+            "n": 37,
+            "rate": 0.5675675675675675,
+            "low": 0.3457025872508399,
+            "high": 0.765280384773876
+          },
+          "caseHeldOut": 5,
+          "controlHeldOut": 115,
+          "difference": {
+            "a": {
+              "successes": 5,
+              "n": 5,
+              "rate": 1,
+              "low": 0.5655085052479191,
+              "high": 1
+            },
+            "b": {
+              "successes": 21,
+              "n": 37,
+              "rate": 0.5675675675675675,
+              "low": 0.40913906334200717,
+              "high": 0.713285131596487
+            },
+            "difference": 0.43243243243243246,
+            "low": -0.025843104202919465,
+            "high": 0.5908609366579929,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 5,
+              "n": 5,
+              "rate": 1,
+              "low": 0.3830843365358592,
+              "high": 1
+            },
+            "b": {
+              "successes": 21,
+              "n": 37,
+              "rate": 0.5675675675675675,
+              "low": 0.3457025872508399,
+              "high": 0.765280384773876
+            },
+            "difference": 0.43243243243243246,
+            "low": -0.21539107278720393,
+            "high": 0.6542974127491601,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +43.2pp, family-adjusted -21.5pp to +65.4pp, over 5 cases and 37 controls."
+        },
+        {
+          "key": "version_ahead_of_releases",
+          "label": "declared version claims more history than it has",
+          "reads": "declared semver implies more history than the package has releases",
+          "contamination": "partial",
+          "because": "young makes a low release count likely, so half of this ratio is downstream of the filter. The declared version is not.",
+          "cases": {
+            "successes": 1,
+            "n": 9,
+            "rate": 0.1111111111111111,
+            "low": 0.01126910863306807,
+            "high": 0.578220806897064
+          },
+          "controls": {
+            "successes": 3,
+            "n": 53,
+            "rate": 0.05660377358490566,
+            "low": 0.012795919161468536,
+            "high": 0.2173679791320008
+          },
+          "caseHeldOut": 1,
+          "controlHeldOut": 99,
+          "difference": {
+            "a": {
+              "successes": 1,
+              "n": 9,
+              "rate": 0.1111111111111111,
+              "low": 0.019890371327130507,
+              "high": 0.4350062147680602
+            },
+            "b": {
+              "successes": 3,
+              "n": 53,
+              "rate": 0.05660377358490566,
+              "low": 0.019436308927314183,
+              "high": 0.15370448936126319
+            },
+            "difference": 0.05450733752620544,
+            "low": -0.07872093413944993,
+            "high": 0.38052797890036616,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 1,
+              "n": 9,
+              "rate": 0.1111111111111111,
+              "low": 0.01126910863306807,
+              "high": 0.578220806897064
+            },
+            "b": {
+              "successes": 3,
+              "n": 53,
+              "rate": 0.05660377358490566,
+              "low": 0.012795919161468536,
+              "high": 0.2173679791320008
+            },
+            "difference": 0.05450733752620544,
+            "low": -0.13473735921326518,
+            "high": 0.523666794434441,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +5.5pp, family-adjusted -13.5pp to +52.4pp, over 9 cases and 53 controls."
+        },
+        {
+          "key": "name_age_days",
+          "label": "name under seven days old (the young conjunct itself)",
+          "reads": "days between the first authored release and the capture",
+          "contamination": "entailed",
+          "because": "It IS the young conjunct, measured continuously. Against a class-matched control both arms are under seven days by construction. Present to make the entailment visible in the output rather than to test anything.",
+          "cases": {
+            "successes": 10,
+            "n": 10,
+            "rate": 1,
+            "low": 0.5539565830025246,
+            "high": 1
+          },
+          "controls": {
+            "successes": 151,
+            "n": 152,
+            "rate": 0.993421052631579,
+            "low": 0.9378571284745435,
+            "high": 0.9993385392059483
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 10,
+              "n": 10,
+              "rate": 1,
+              "low": 0.7224598312333834,
+              "high": 1
+            },
+            "b": {
+              "successes": 151,
+              "n": 152,
+              "rate": 0.993421052631579,
+              "low": 0.9636780466667177,
+              "high": 0.9988377385921606
+            },
+            "difference": 0.006578947368421018,
+            "low": -0.2710140744563316,
+            "high": 0.03632195333328225,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 10,
+              "n": 10,
+              "rate": 1,
+              "low": 0.5539565830025246,
+              "high": 1
+            },
+            "b": {
+              "successes": 151,
+              "n": 152,
+              "rate": 0.993421052631579,
+              "low": 0.9378571284745435,
+              "high": 0.9993385392059483
+            },
+            "difference": 0.006578947368421018,
+            "low": -0.43950372041204944,
+            "high": 0.0621428715254565,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +0.7pp, family-adjusted -44.0pp to +6.2pp, over 10 cases and 152 controls."
+        },
+        {
+          "key": "has_provenance",
+          "label": "has npm provenance",
+          "reads": "npm attestations or a trusted publisher on the captured version",
+          "contamination": "entailed",
+          "because": "Trusted publishing needs a GitHub repository and a workflow, and !hasRepository is a conjunct. Measured at full size in D11: 0/10 cases against 0/950 class-matched controls, exactly 0.0pp, against −44.7pp on the raw pool.",
+          "cases": {
+            "successes": 0,
+            "n": 10,
+            "rate": 0,
+            "low": 5.551115123125783e-17,
+            "high": 0.44604341699747535
+          },
+          "controls": {
+            "successes": 0,
+            "n": 152,
+            "rate": 0,
+            "low": 3.469446951953614e-18,
+            "high": 0.050308390083768445
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 10,
+              "rate": 0,
+              "low": 0,
+              "high": 0.2775401687666166
+            },
+            "b": {
+              "successes": 0,
+              "n": 152,
+              "rate": 0,
+              "low": 0,
+              "high": 0.024650670937670042
+            },
+            "difference": 0,
+            "low": -0.024650670937670042,
+            "high": 0.2775401687666166,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 10,
+              "rate": 0,
+              "low": 5.551115123125783e-17,
+              "high": 0.44604341699747535
+            },
+            "b": {
+              "successes": 0,
+              "n": 152,
+              "rate": 0,
+              "low": 3.469446951953614e-18,
+              "high": 0.050308390083768445
+            },
+            "difference": 0,
+            "low": -0.050308390083768445,
+            "high": 0.44604341699747535,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +0.0pp, family-adjusted -5.0pp to +44.6pp, over 10 cases and 152 controls."
+        },
+        {
+          "key": "provenance_lost",
+          "label": "lost provenance it previously had",
+          "reads": "a previous version was signed and the captured one is not",
+          "contamination": "entailed",
+          "because": "Requires a signed predecessor, which requires the repository the conjunct excludes. Cannot fire on either arm of a class-matched comparison, and a 0-versus-0 is not a result.",
+          "cases": {
+            "successes": 0,
+            "n": 10,
+            "rate": 0,
+            "low": 5.551115123125783e-17,
+            "high": 0.44604341699747535
+          },
+          "controls": {
+            "successes": 0,
+            "n": 152,
+            "rate": 0,
+            "low": 3.469446951953614e-18,
+            "high": 0.050308390083768445
+          },
+          "caseHeldOut": 0,
+          "controlHeldOut": 0,
+          "difference": {
+            "a": {
+              "successes": 0,
+              "n": 10,
+              "rate": 0,
+              "low": 0,
+              "high": 0.2775401687666166
+            },
+            "b": {
+              "successes": 0,
+              "n": 152,
+              "rate": 0,
+              "low": 0,
+              "high": 0.024650670937670042
+            },
+            "difference": 0,
+            "low": -0.024650670937670042,
+            "high": 0.2775401687666166,
+            "separated": false
+          },
+          "familyAdjusted": {
+            "a": {
+              "successes": 0,
+              "n": 10,
+              "rate": 0,
+              "low": 5.551115123125783e-17,
+              "high": 0.44604341699747535
+            },
+            "b": {
+              "successes": 0,
+              "n": 152,
+              "rate": 0,
+              "low": 3.469446951953614e-18,
+              "high": 0.050308390083768445
+            },
+            "difference": 0,
+            "low": -0.050308390083768445,
+            "high": 0.44604341699747535,
+            "separated": false
+          },
+          "verdict": "INCONCLUSIVE at this n. +0.0pp, family-adjusted -5.0pp to +44.6pp, over 10 cases and 152 controls."
+        }
+      ]
+    }
+  ],
+  "z": 2.837596914402418,
+  "family": {
+    "families": 297,
+    "cadences": 432,
+    "isolated": 1078,
+    "tightBatches": 128,
+    "allFirstPublication": 73,
+    "tightAndAllNew": 30,
+    "tightAndAllNewWithToken": 21,
+    "maliciousFamilies": [
+      {
+        "publisher": "whltd4",
+        "packages": [
+          "napi-raw",
+          "eslint-generate-release",
+          "check-audit",
+          "resolve-audit",
+          "cspell-esm"
+        ],
+        "spanMinutes": 8.352483333333334,
+        "tight": true,
+        "allNew": true,
+        "sharedToken": null
+      },
+      {
+        "publisher": "javonayers999",
+        "packages": [
+          "async-critical-section",
+          "keyed-mutex-map",
+          "resource-lease-pool",
+          "single-flight-lock",
+          "try-lock-runner"
+        ],
+        "spanMinutes": 4.236166666666667,
+        "tight": true,
+        "allNew": true,
+        "sharedToken": null
+      },
+      {
+        "publisher": "whltd4",
+        "packages": [
+          "gunzip-js",
+          "depcruise-fmt",
+          "depcruise-baseline"
+        ],
+        "spanMinutes": 3.8004,
+        "tight": true,
+        "allNew": true,
+        "sharedToken": null
+      },
+      {
+        "publisher": "a_soclav",
+        "packages": [
+          "kit-hydration-vim",
+          "svelte-goal-vim"
+        ],
+        "spanMinutes": 0.24186666666666667,
+        "tight": false,
+        "allNew": true,
+        "sharedToken": "vim"
+      },
+      {
+        "publisher": "rihannasmith",
+        "packages": [
+          "ai-texts",
+          "ai-texts-utils"
+        ],
+        "spanMinutes": 1.0941833333333333,
+        "tight": false,
+        "allNew": false,
+        "sharedToken": "texts"
+      },
+      {
+        "publisher": "ferrousdev",
+        "packages": [
+          "bcs-core",
+          "sui-gql-core"
+        ],
+        "spanMinutes": 0.09686666666666667,
+        "tight": false,
+        "allNew": false,
+        "sharedToken": "core"
+      },
+      {
+        "publisher": "ferrousdev",
+        "packages": [
+          "leb128x",
+          "sui-move-rpc"
+        ],
+        "spanMinutes": 10.467133333333333,
+        "tight": false,
+        "allNew": false,
+        "sharedToken": null
+      },
+      {
+        "publisher": "wokorc",
+        "packages": [
+          "sui-move-graphql",
+          "ulebkit"
+        ],
+        "spanMinutes": 2.9899833333333334,
+        "tight": false,
+        "allNew": false,
+        "sharedToken": null
+      }
+    ],
+    "sequences": [
+      {
+        "shape": "<stem>-N-th",
+        "members": [
+          {
+            "package": "spingear-001-th",
+            "number": 1,
+            "publisher": "tiny-js-helpers",
+            "at": "2026-08-18T10:05:31.192Z"
+          },
+          {
+            "package": "luckyhelper-003-th",
+            "number": 3,
+            "publisher": "node-mini-tools",
+            "at": "2026-08-18T09:49:06.573Z"
+          },
+          {
+            "package": "rtptool-007-th",
+            "number": 7,
+            "publisher": "tiny-js-helpers",
+            "at": "2026-08-18T10:08:42.422Z"
+          },
+          {
+            "package": "credithelper-009-th",
+            "number": 9,
+            "publisher": "pkg-utils-lab",
+            "at": "2026-08-18T10:00:31.465Z"
+          },
+          {
+            "package": "slotkit-012-th",
+            "number": 12,
+            "publisher": "tiny-js-helpers",
+            "at": "2026-08-18T10:10:49.060Z"
+          },
+          {
+            "package": "spingear-037-th",
+            "number": 37,
+            "publisher": "node-mini-tools",
+            "at": "2026-08-19T19:59:33.511Z"
+          },
+          {
+            "package": "reelutil-038-th",
+            "number": 38,
+            "publisher": "pkg-utils-lab",
+            "at": "2026-08-19T20:01:34.844Z"
+          },
+          {
+            "package": "luckyhelper-039-th",
+            "number": 39,
+            "publisher": "tiny-js-helpers",
+            "at": "2026-08-19T20:02:32.762Z"
+          },
+          {
+            "package": "demospin-041-th",
+            "number": 41,
+            "publisher": "pkg-utils-lab",
+            "at": "2026-08-19T20:04:27.107Z"
+          },
+          {
+            "package": "baccarathelp-044-th",
+            "number": 44,
+            "publisher": "pkg-utils-lab",
+            "at": "2026-08-19T20:10:14.518Z"
+          },
+          {
+            "package": "credithelper-045-th",
+            "number": 45,
+            "publisher": "tiny-js-helpers",
+            "at": "2026-08-19T20:11:12.408Z"
+          },
+          {
+            "package": "gamehubutil-047-th",
+            "number": 47,
+            "publisher": "tiny-js-helpers",
+            "at": "2026-08-19T20:14:04.556Z"
+          },
+          {
+            "package": "slotkit-048-th",
+            "number": 48,
+            "publisher": "node-mini-tools",
+            "at": "2026-08-19T20:15:02.550Z"
+          },
+          {
+            "package": "spingear-049-th",
+            "number": 49,
+            "publisher": "pkg-utils-lab",
+            "at": "2026-08-19T20:16:00.862Z"
+          },
+          {
+            "package": "luckyhelper-051-th",
+            "number": 51,
+            "publisher": "node-mini-tools",
+            "at": "2026-08-19T20:17:57.679Z"
+          },
+          {
+            "package": "demospin-053-th",
+            "number": 53,
+            "publisher": "tiny-js-helpers",
+            "at": "2026-08-19T20:19:52.567Z"
+          },
+          {
+            "package": "walletpay-054-th",
+            "number": 54,
+            "publisher": "node-mini-tools",
+            "at": "2026-08-19T20:20:50.678Z"
+          },
+          {
+            "package": "baccarathelp-056-th",
+            "number": 56,
+            "publisher": "node-mini-tools",
+            "at": "2026-08-19T20:23:44.719Z"
+          },
+          {
+            "package": "credithelper-057-th",
+            "number": 57,
+            "publisher": "pkg-utils-lab",
+            "at": "2026-08-19T20:24:42.981Z"
+          },
+          {
+            "package": "gamehubutil-059-th",
+            "number": 59,
+            "publisher": "node-mini-tools",
+            "at": "2026-08-19T20:26:37.874Z"
+          },
+          {
+            "package": "spingear-061-th",
+            "number": 61,
+            "publisher": "tiny-js-helpers",
+            "at": "2026-08-19T20:28:33.562Z"
+          },
+          {
+            "package": "luckyhelper-063-th",
+            "number": 63,
+            "publisher": "tiny-js-helpers",
+            "at": "2026-08-19T20:31:28.387Z"
+          }
+        ],
+        "publishers": [
+          "node-mini-tools",
+          "pkg-utils-lab",
+          "tiny-js-helpers"
+        ],
+        "crossAccountAdjacency": 17,
+        "adjacentPairs": 21,
+        "spanMinutes": 2082.363566666667,
+        "medianGapSeconds": 116.817
+      }
+    ],
+    "droppedNoPublisher": 0
+  },
+  "createdAtAfterFirstRelease": 58,
+  "registryAttributed": 0,
+  "takedownPlaceholders": 0,
+  "classDisagreements": 58
+}

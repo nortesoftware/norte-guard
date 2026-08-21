@@ -454,13 +454,37 @@ export interface CaptureComposition {
 // by policy" and "the bytes were lost by a wipe" are the same shape on disk and
 // opposite facts about the corpus: one is a knowable exclusion that every
 // denominator can be corrected for, the other is a defect.
-export interface TarballRefusal {
-  reason: 'over-capture-cap'
-  // What the packument declared, and what the cap was, so the decision can be
-  // re-made later against a different cap without asking the registry.
-  unpackedSize: number
-  capBytes: number
-}
+// Two ways a capture can decline the bytes and keep the packument. Both leave
+// the package in every population and every denominator; only the tarball is
+// declined, and the reason is recorded so the decision can be re-made later
+// without asking the registry again.
+//
+// A union rather than an optional field, because the two carry different
+// evidence: a size refusal needs the cap it was measured against, and a
+// same-scope refusal needs the package that declared it.
+export type TarballRefusal =
+  | {
+      reason: 'over-capture-cap'
+      // What the packument declared, and what the cap was, so the decision can
+      // be re-made later against a different cap without asking the registry.
+      unpackedSize: number
+      capBytes: number
+    }
+  | {
+      // A dependency published under the SAME npm scope as the package that
+      // declared it. That is what a monorepo release looks like — 203 of the
+      // first 219 captures on the dependency path — and the four carriers this
+      // rule was written for are all cross-scope.
+      //
+      // Degraded rather than excluded, deliberately. Excluding same-scope
+      // siblings would remove them from the denominator too, and the question
+      // "does an operator ever use one scope for both the decoy and the
+      // carrier" would stop being answerable. Keeping the packument leaves it
+      // measurable at about 8% of the disk cost.
+      reason: 'same-scope-sibling'
+      unpackedSize: number
+      declaredBy: string
+    }
 
 export interface CaptureMetadata {
   package: string

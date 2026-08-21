@@ -39,13 +39,19 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { gunzipSync } from 'node:zlib'
 import { join } from 'node:path'
-import { loadCorpus, type CorpusSample } from './corpus.js'
+import { loadCorpus, type CorpusSample, type LabeledCorpus } from './corpus.js'
 import { readLiveTakedowns } from './field-recall.js'
 import { capturePackument } from './size-control.js'
 import { NgpackSource } from './ngpack.js'
 import { readTar, DEFAULT_TAR_LIMITS, type TarLimits, type TarReadResult } from './tarball.js'
 import { analyzeArchive } from './analyzability-run.js'
 import { scanArchive, type CapabilityScan } from './capability-run.js'
+import {
+  resolutionProfileOf, strictCapabilitiesOf, compareBinary, compareContinuous,
+  AUTHORED_OPACITY,
+  type ResolutionProfile, type OpacityComparison, type ContinuousComparison,
+} from './import-opacity.js'
+import { operatorOf, collapse, linkFor } from './operator.js'
 import { capabilitiesOf, answerFor, CAPABILITIES, capabilityDefinitions, capabilityCaveats, type Answer, type Capability } from './capabilities.js'
 import { NPM_SECURITY_HOLDER } from './takedown.js'
 import type { LegibilityThreshold } from './analyzability.js'
@@ -75,6 +81,19 @@ export const SIZE_CALIPER_LOG10 = 0.3
 // return "inconclusive", which is a decision rule that never decides.
 export const EQUIVALENCE_MARGIN = 0.20
 
+// The intervals the opacity section adds to the family, declared here beside the
+// other pre-run constants rather than derived from the array that produces them —
+// so that adding a measure and forgetting to widen the correction is a test
+// failure and not a silent loosening. `test/capabilities.test.ts` pins it against
+// what the run actually prints.
+//
+// Five binary opacity measures at the primary unit (any authored opacity, plus the
+// four authored kinds one at a time) and four strict-capability comparisons. The
+// continuous measures add none: they are reported as medians and a
+// common-language effect size with no interval and no threshold, which is a
+// description and not a test.
+export const OPACITY_ENDPOINTS = 9
+
 // The units a package can be counted at, and what each one represents.
 //
 //   capture      every snapshot. @siwatfa/yorn is 36 of them and one operator,
@@ -95,9 +114,27 @@ export const EQUIVALENCE_MARGIN = 0.20
 // capture of it in the window too, so the union rule gives the cases and the
 // controls the same number of chances to fire. Without that it would give the
 // cases 36 draws and the controls one.
-export type Unit = 'capture' | 'package' | 'publisher' | 'package-any' | 'publisher-any'
-export const UNITS: Unit[] = ['capture', 'package', 'publisher', 'package-any', 'publisher-any']
-export const PRIMARY_UNIT: Unit = 'publisher'
+export type Unit = 'capture' | 'package' | 'publisher' | 'operator' | 'package-any' | 'publisher-any'
+export const UNITS: Unit[] = ['capture', 'package', 'publisher', 'operator', 'package-any', 'publisher-any']
+
+// The publisher unit assumes accounts are independent, and the corpus contains a
+// counter-example: ferrousdev, wokorc and corssdev are one operator, established
+// by a package.json field order no other publisher in 10,192 names uses and by
+// the same two-tier dependency structure four times in 28.6 hours. See
+// operator.ts.
+//
+// So `publisher` over-counts the independent events it exists to count, and the
+// primary unit moves to `operator`, which is the publisher unit with the
+// declared links collapsed. Where no link is declared an account is its own
+// operator, so the operator unit is never coarser than the publisher unit by
+// accident — it differs only where a merge has been demonstrated and written
+// down.
+//
+// Both are printed. `publisher` stays in the output because every earlier run
+// reported it and a reader comparing against those needs the same number, not a
+// silently improved one.
+export const PRIMARY_UNIT: Unit = 'operator'
+export const PREVIOUS_PRIMARY_UNIT: Unit = 'publisher'
 // The one to read when the question is what the code reaches rather than how
 // many independent events there were. Both are printed; neither replaces the
 // other.
@@ -170,6 +207,18 @@ export interface MeasuredMember {
   // The same four under the post-hoc definition of credential_read. Reported
   // apart, always.
   repaired: Record<Capability, Answer>
+  // The same four counting only evidence a reader can check: a module resolved by
+  // name, or an ambient call the parser read. A frozen `reached` that rested on
+  // the walk having LOST the specifier becomes indeterminate here, because "the
+  // specifier could not be read" is not evidence that it does not reach. See
+  // import-opacity.ts. Reported apart, like `repaired`, and never in place of
+  // `answers`.
+  strict: Record<Capability, Answer>
+  // What the walk could and could not follow, as a measurement rather than as a
+  // blinder. Null when the archive was never opened: a package nothing read has
+  // no resolution rate, and a zero there would put "we did not look" and "it hides
+  // nothing" in one bucket.
+  profile: ResolutionProfile | null
   failure?: string
 }
 
@@ -388,7 +437,9 @@ export function atUnit(members: MeasuredMember[], unit: Unit): MeasuredMember[] 
   for (const m of members) {
     const key = unit === 'package' || unit === 'package-any'
       ? m.member.package
-      : (m.member.publisher ?? `unknown:${m.member.package}`)
+      : unit === 'operator'
+        ? (operatorOf(m.member.publisher) ?? `unknown:${m.member.package}`)
+        : (m.member.publisher ?? `unknown:${m.member.package}`)
     const at = byKey.get(key)
     if (at) at.push(m)
     else byKey.set(key, [m])
@@ -397,11 +448,13 @@ export function atUnit(members: MeasuredMember[], unit: Unit): MeasuredMember[] 
   const out: MeasuredMember[] = []
   for (const group of byKey.values()) {
     const earliest = [...group].sort((a, b) => a.member.capturedAt.localeCompare(b.member.capturedAt))[0]!
-    if (unit === 'package' || unit === 'publisher') { out.push(earliest); continue }
+    if (unit === 'package' || unit === 'publisher' || unit === 'operator') { out.push(earliest); continue }
     out.push({
       ...earliest,
       answers: unionAnswers(group.map(m => m.answers)),
       repaired: unionAnswers(group.map(m => m.repaired)),
+      strict: unionAnswers(group.map(m => m.strict)),
+      scan: foldScans(group.map(m => m.scan), earliest.scan),
     })
   }
   return out.sort((a, b) => a.member.capturedAt.localeCompare(b.member.capturedAt))
@@ -416,12 +469,77 @@ export function unionAnswers(all: Array<Record<Capability, Answer>>): Record<Cap
   })) as Record<Capability, Answer>
 }
 
+// The `-any` fold has to reach the SCAN as well as the answers, and until this
+// was written it did not: `atUnit` unioned `answers` and kept the earliest
+// capture's `scan`, so every scan-derived counter in `summariseGroup` — opacity,
+// never-opened, blinded-at-entry, external dependency, both halves of
+// credential_read — described one capture at a unit whose declared contract is
+// "ever, in the window".
+//
+// It is not cosmetic and it hit the run's own headline. On 2026-08-21 three case
+// packages ship an executable no parser reads — @siwatfa/yorn, kit-hydration-vim
+// and ai-texts — from three distinct accounts, and publisher-any printed 2 of 8,
+// because rihannasmith's earliest capture is ai-texts-utils and the minified one
+// is ai-texts. Opacity is the finding this study can actually support, and it was
+// being undercounted at the unit that states it.
+//
+// The fold is deliberately NOT a blanket OR. Two of these fields record what a
+// unit demonstrated and two record a failure to look at it, and they go opposite
+// ways:
+//
+//   opaqueExecutable, externalModules,     ANY capture. A thing demonstrated
+//   secretPathsReached, tokenEnvRead,      once is demonstrated, which is the
+//   namelessEnvRead                        same lattice `unionAnswers` uses.
+//
+//   refusal, entryPoints                   EVERY capture. "Never opened at all"
+//                                          means not once, so a unit with one
+//                                          readable capture was opened, and
+//                                          reporting it as refused would count a
+//                                          blinder the analysis did not have.
+//
+// `reachability` cannot be unioned field by field without inventing a graph that
+// no capture had, so it is represented rather than merged: the earliest capture
+// that was opened AND resolved an entry point stands for the unit, falling back
+// to the earliest opened one and then to the earliest. That is what makes the
+// two intersecting fields come out right — `refusedToAnalyse` counts a unit only
+// if nothing was ever opened, and `noEntryPoint` only if nothing ever resolved
+// one — without claiming a reachability graph that was never computed.
+export function foldScans(scans: CapabilityScan[], earliest: CapabilityScan): CapabilityScan {
+  if (scans.length <= 1) return earliest
+
+  const opened = scans.filter(s => s.refusal === null)
+  const representative =
+    opened.find(s => (s.reachability?.entryPoints.length ?? 0) > 0) ?? opened[0] ?? earliest
+  const union = <T>(pick: (s: CapabilityScan) => T[]): T[] =>
+    [...new Set(scans.flatMap(pick))]
+
+  return {
+    ...representative,
+    // Null the moment any capture of this unit was readable.
+    refusal: opened.length > 0 ? null : earliest.refusal,
+    reachability: representative.reachability,
+    opaqueExecutable: scans.some(s => s.opaqueExecutable),
+    opaqueKinds: union(s => s.opaqueKinds),
+    parseableFiles: Math.max(...scans.map(s => s.parseableFiles)),
+    sourceBytes: Math.max(...scans.map(s => s.sourceBytes)),
+    capabilities: {
+      ...representative.capabilities,
+      externalModules: union(s => s.capabilities.externalModules),
+      secretPathsReached: union(s => s.capabilities.secretPathsReached),
+      tokenEnvRead: union(s => s.capabilities.tokenEnvRead),
+      namelessEnvRead: scans.some(s => s.capabilities.namelessEnvRead),
+      secretPathGrepOnly: Math.max(...scans.map(s => s.capabilities.secretPathGrepOnly)),
+    },
+  }
+}
+
 export function summariseGroup(input: {
   name: string
   unit: Unit
   members: MeasuredMember[]
   failures: Array<{ package: string; reason: string }>
   repaired?: boolean
+  strict?: boolean
 }): GroupReport {
   const { members } = input
   const byReason = new Map<string, number>()
@@ -439,7 +557,7 @@ export function summariseGroup(input: {
     measured: members.filter(m => !m.failure).length,
     failures: input.failures,
     medianUnpackedSize: sizes.length > 0 ? sizes[Math.floor(sizes.length / 2)]! : null,
-    byCapability: counts(members, m => (input.repaired ? m.repaired : m.answers)),
+    byCapability: counts(members, m => (input.strict ? m.strict : input.repaired ? m.repaired : m.answers)),
     refusedToAnalyse: members.filter(m => m.scan.refusal !== null).length,
     shipsOpaqueExecutable: members.filter(m => m.scan.opaqueExecutable).length,
     blindedAtEntry: members.filter(m => m.scan.opaqueExecutable || m.scan.refusal !== null).length,
@@ -615,6 +733,18 @@ export interface ControlOptions {
   // which controls exist.
   since?: string
   until?: string
+  // Restrict the control pool to one captureReason.
+  //
+  // Off by default, and it exists because the default is not the like-for-like
+  // comparison it reads as. The two capture reasons select different
+  // populations — 'quarantine-no-genome' keeps everything matching the three
+  // conjuncts of the observed class, 'watcher-threshold' keeps whatever scored
+  // high — and on the 2026-08-21 run the case arm was 7 of 8 quarantine while
+  // the matched controls were 49 of 125. Size matching narrows that gap (the
+  // pool is 13.5% quarantine and the matched controls are 39.2%, because the
+  // cases are tiny and so is that class) and does not close it. Passing this
+  // trades control-arm size for a control drawn through the same filter.
+  controlCaptureReason?: string
   onProgress?: (stage: string, done: number, total: number) => void
   now?: () => string
 }
@@ -629,6 +759,9 @@ export interface CapabilityControlReport {
     equivalenceMargin: number
     primaryUnit: Unit
     excluded: string[]
+    // Null when the control pool was drawn from every capture reason, which is
+    // the default and is NOT a like-for-like draw. See ControlOptions.
+    controlCaptureReason: string | null
   }
   window: { since: string; until: string }
   cohort: {
@@ -704,6 +837,30 @@ export interface CapabilityControlReport {
   // printed above them. It exists so the finding cannot be assembled by a reader
   // out of whichever row they reached first.
   headline: Headline
+  // IDEA 1 AND 2 — what the walk could not follow, counted instead of only used
+  // as a blinder, and the capability answers recomputed on resolved evidence
+  // alone. See import-opacity.ts.
+  opacity: {
+    note: string
+    unit: Unit
+    endpointsAdded: number
+    binary: OpacityComparison[]
+    continuous: ContinuousComparison[]
+    // How many members had no profile at all, per arm. A package nothing opened
+    // cannot have a resolution rate, and it is held out rather than zeroed.
+    withoutProfile: { cases: number; controls: number }
+    strict: {
+      note: string
+      cases: GroupReport
+      controls: GroupReport
+      capabilities: CapabilityComparison[]
+      // Frozen `reached` answers that the strict pass demotes, per capability and
+      // per arm. If this is zero everywhere then the frozen answers rested on
+      // resolved evidence all along and idea 2 changed nothing — which is a
+      // result and is stated as one.
+      demoted: Array<{ capability: Capability; cases: number; controls: number }>
+    }
+  }
   // The post-hoc definition, at the primary unit only, and never folded into the
   // comparisons above.
   posthoc: {
@@ -715,9 +872,24 @@ export interface CapabilityControlReport {
   caveats: string[]
 }
 
-export function runCapabilityControl(options: ControlOptions): CapabilityControlReport {
-  const corpus = loadCorpus(options.roots)
+// The case arm, assembled once. Extracted from `runCapabilityControl` so that
+// `norte-guard corpus --publishers` reports the number A5 will actually use
+// rather than a second implementation of the same filter. The count of distinct
+// publishers here is what decides whether A5 is worth re-running, and a decision
+// number that two code paths can disagree about is a number nobody can act on.
+export interface CaseCohort {
+  confirmed: CorpusSample[]
+  withBytes: CorpusSample[]
+  // Confirmed removals whose tarball is gone. Not a filter detail: the sweep
+  // documented in docs/audit-a5.md deleted 3,190 referenced objects, 31 of them
+  // labelled, and that is why this arm is smaller than the corpus suggests.
+  withoutBytes: CorpusSample[]
+  excludedByName: string[]
+  members: CohortMember[]
+  unclassifiable: number
+}
 
+export function caseCohortOf(corpus: LabeledCorpus): CaseCohort {
   const confirmed = corpus.confirmedMalicious
   const withBytes = confirmed.filter(s => s.tarballPresent)
   const excludedByName = withBytes
@@ -726,13 +898,31 @@ export function runCapabilityControl(options: ControlOptions): CapabilityControl
 
   const caseSamples = withBytes.filter(s => !INSPIRED_THE_CLASS.includes(s.package))
 
-  const caseMembers: CohortMember[] = []
+  const members: CohortMember[] = []
   let unclassifiable = 0
   for (const sample of caseSamples) {
     const member = memberOf(sample)
     if (!member) { unclassifiable++; continue }
-    caseMembers.push(member)
+    members.push(member)
   }
+
+  return {
+    confirmed,
+    withBytes,
+    withoutBytes: confirmed.filter(s => !s.tarballPresent),
+    excludedByName,
+    members,
+    unclassifiable,
+  }
+}
+
+export function runCapabilityControl(options: ControlOptions): CapabilityControlReport {
+  const corpus = loadCorpus(options.roots)
+
+  const cohort = caseCohortOf(corpus)
+  const { withBytes, excludedByName, unclassifiable } = cohort
+  const confirmed = cohort.confirmed
+  const caseMembers = cohort.members
 
   // The window is the cases' own span unless the caller overrides it, and an
   // override is recorded in the report because it decides which controls exist.
@@ -750,7 +940,8 @@ export function runCapabilityControl(options: ControlOptions): CapabilityControl
   )
   const poolWithBytes = inWindow.filter(s => s.tarballPresent)
   const poolSamples = poolWithBytes.filter(s =>
-    s.label !== 'confirmed_malicious' && !removed.has(s.package)
+    s.label !== 'confirmed_malicious' && !removed.has(s.package) &&
+    (options.controlCaptureReason === undefined || s.captureReason === options.controlCaptureReason)
   )
 
   const poolMembers: CohortMember[] = []
@@ -869,7 +1060,16 @@ export function runCapabilityControl(options: ControlOptions): CapabilityControl
 
   // Every interval this report prints is one of a family, and the family is
   // counted before any of them is read.
-  const endpointFamily = groups.length * CAPABILITIES.length
+  //
+  // It grew when the opacity endpoints were added, and it had to. Testing more
+  // endpoints on the same data because the first four saturated is the textbook
+  // shape of multiplicity, and the correction is the only thing that stops "we
+  // tried nine things and one separated" from reading as a finding. The widening
+  // is applied to the FOUR CAPABILITIES TOO, so their intervals in this run are
+  // wider than in the run of 2026-08-21 — that is the cost of having looked at
+  // more, and charging it to the new endpoints alone would be helping oneself.
+  const capabilityEndpoints = groups.length * CAPABILITIES.length
+  const endpointFamily = capabilityEndpoints + OPACITY_ENDPOINTS
   const z = zForFamily(endpointFamily)
 
   const comparisons: UnitComparison[] = groups.map(g => ({
@@ -910,6 +1110,7 @@ export function runCapabilityControl(options: ControlOptions): CapabilityControl
       equivalenceMargin: EQUIVALENCE_MARGIN,
       primaryUnit: PRIMARY_UNIT,
       excluded: INSPIRED_THE_CLASS,
+      controlCaptureReason: options.controlCaptureReason ?? null,
     },
     window: { since, until },
     cohort: {
@@ -969,6 +1170,7 @@ export function runCapabilityControl(options: ControlOptions): CapabilityControl
     contamination: contaminationOf(measuredCases),
     comparisons,
     headline: headlineOf(comparisons, measuredCases),
+    opacity: opacityReport(measuredCases, measuredControls, z),
     posthoc: {
       note:
         'The secret-path half of credential_read, repaired after the cases were opened: SECRET_PATHS ' +
@@ -996,6 +1198,8 @@ export function measureMember(member: CohortMember, options: { threshold?: Legib
       member, scan, failure,
       answers: answersOf(scan),
       repaired: answersOf(scan),
+      strict: answersOf(scan),
+      profile: null,
     }
   }
 
@@ -1038,6 +1242,8 @@ export function measureMember(member: CohortMember, options: { threshold?: Legib
       })
     : scan.capabilities
 
+  const strict = strictCapabilitiesOf(scan)
+
   return {
     member,
     scan,
@@ -1045,6 +1251,12 @@ export function measureMember(member: CohortMember, options: { threshold?: Legib
     repaired: Object.fromEntries(
       CAPABILITIES.map(c => [c, repaired.answers.find(a => a.capability === c)?.answer ?? 'indeterminate'])
     ) as Record<Capability, Answer>,
+    strict: strict
+      ? Object.fromEntries(
+          CAPABILITIES.map(c => [c, strict.find(a => a.capability === c)?.strictAnswer ?? 'indeterminate'])
+        ) as Record<Capability, Answer>
+      : answersOf(scan),
+    profile: resolutionProfileOf(scan),
   }
 }
 
@@ -1191,6 +1403,441 @@ export function contaminationOf(cases: MeasuredMember[]): CapabilityControlRepor
   }
 }
 
+// ---------------------------------------------------------------------------
+// What the case arm is, without running the study
+// ---------------------------------------------------------------------------
+
+// A5's blocker was never the number of captures. It is the number of distinct
+// npm accounts on the case side, because the publisher unit is the primary one
+// and its members are the only ones that are independent events. At 3 accounts
+// no per-capability difference was claimable and the run said so; the question
+// "has that changed" had no answer short of re-deriving the cohort by hand,
+// which is how a decision number stops being consulted.
+//
+// So it is a command. `norte-guard corpus --publishers` calls this, and this
+// calls `caseCohortOf` — the same function `runCapabilityControl` calls — so
+// the number cannot drift from the one A5 will use.
+export interface CasePublisherReport {
+  confirmedCaptures: number
+  confirmedWithBytes: number
+  captures: number
+  packages: number
+  publishers: number
+  // The number that actually bounds the intervals. `publishers` counts accounts
+  // and assumes they are independent; this counts operators, which is the same
+  // thing with the demonstrated links collapsed. See operator.ts.
+  operators: number
+  mergedAccounts: Array<{ operator: string; accounts: string[] }>
+  breakdown: Array<{ publisher: string; packages: string[]; captures: number }>
+  unclassifiable: number
+  excludedByName: string[]
+  // The other side of the count. Every confirmed removal whose bytes are gone is
+  // a case that cannot be measured, and the accounts that appear ONLY here are
+  // the ones the object-store sweep cost this study outright.
+  lost: {
+    captures: number
+    packages: number
+    publishers: number
+    publishersOnlyHere: string[]
+  }
+  // What the count would have to be, measured against the control arm the last
+  // saved run actually had. Null when no run has been saved: the distance to
+  // power is a statement about a specific control arm, and inventing one would
+  // be the same error as reading a rate off an empty denominator.
+  power: PowerDistance | null
+  caveats: string[]
+}
+
+export interface PowerDistance {
+  fromRun: string
+  // Control members at the primary unit, before the indeterminate ones are
+  // dropped. Reported because it is the number the run's own ceiling statement
+  // uses, and because the gap between it and `nDeterminate` below is most of
+  // what makes this study hard.
+  nControls: number
+  z: number
+  byCapability: Array<{
+    capability: Capability
+    controlRate: number
+    // The control denominator the comparison ACTUALLY runs on: controls that
+    // answered either way. `compareAt` compares overDeterminate against
+    // overDeterminate, so a requirement computed against the member count would
+    // be a requirement for a comparison this study does not make. On the run of
+    // 2026-08-21 that is 49 controls for credential_read, not 125.
+    nDeterminate: number
+    // Cases that answered either way, over cases. The share the audit's power
+    // table indexes on, measured rather than assumed.
+    determinateShare: number
+    // Publishers needed for a difference of MARGIN to separate AND KEEP
+    // separating, at the measured determinate share. Null when no n up to the
+    // search bound does it.
+    publishersNeeded: number | null
+    // The first n that separates at all. Lower than the above whenever rounding
+    // makes `separated` non-monotone, which on this data it always does. Printed
+    // beside it so the gap is visible: an n between the two is an n where one
+    // more account can take the answer away.
+    firstSeparating: number | null
+    // The largest control rate that could still separate at the CURRENT case n.
+    // Per capability, because the denominator is per capability.
+    ceiling: number
+    controlRateUnderCeiling: boolean
+  }>
+}
+
+// The effect size the power question is asked about. The audit's table is
+// written for +30pp and this keeps that, so the two are comparable: a smaller
+// margin would make the requirement larger and look like the study got harder.
+export const POWER_MARGIN = 0.30
+
+// Above this the search is answering a question nobody can act on: the case arm
+// gains publishers at a few a week.
+export const MAX_PUBLISHERS_SEARCHED = 500
+
+// Smallest case-arm publisher count at which a difference of `margin` over the
+// control rate separates at the family-adjusted z, given how often a case yields
+// a determinate answer at all.
+//
+// The determinate share is the term that makes this table honest and it is the
+// one a reader skips. A case that ships a bytecode blob answers indeterminate to
+// all four, and an indeterminate case is not a case with an unknown value — it
+// is a case that leaves the denominator. Publishers arrive; determinate
+// publishers arrive more slowly, and at the share this corpus shows, most of
+// them do not arrive at all.
+// It returns the STABLE threshold — the smallest n from which every larger n
+// separates too — and not the first n that happens to.
+//
+// The two are not the same and the gap is wide enough to mislead. Both `n` and
+// the reach count are rounded to whole publishers, so `separated` is not
+// monotone in n: on the run of 2026-08-21, credential_read first separates at 31
+// accounts and then fails again at 33, 34, 39 and 40 before holding from 41.
+// external_exec first separates at 49 and fails at 51, 54, 55, 56 and 59 before
+// holding from 60. A number that decides when to re-run a study cannot be a
+// number where one more account takes the answer away, so the first-separating n
+// is reported alongside rather than instead — see `firstSeparatingN`.
+export function publishersNeededFor(input: {
+  controlRate: number
+  nControls: number
+  z: number
+  determinateShare: number
+  margin?: number
+}): number | null {
+  if (input.determinateShare <= 0) return null
+
+  const separates = separatesAt(input)
+  if (!separates(MAX_PUBLISHERS_SEARCHED)) return null
+
+  // Walk down from the bound: the answer is one past the largest n that fails.
+  for (let n = MAX_PUBLISHERS_SEARCHED - 1; n >= 1; n--) {
+    if (!separates(n)) return n + 1
+  }
+  return 1
+}
+
+// The first n that separates at all. Below the stable threshold it is a coin
+// landing the right way up, and it is exported so the distance between the two
+// can be printed rather than discovered.
+export function firstSeparatingN(input: {
+  controlRate: number
+  nControls: number
+  z: number
+  determinateShare: number
+  margin?: number
+}): number | null {
+  if (input.determinateShare <= 0) return null
+
+  const separates = separatesAt(input)
+  for (let n = 1; n <= MAX_PUBLISHERS_SEARCHED; n++) {
+    if (separates(n)) return n
+  }
+  return null
+}
+
+function separatesAt(input: {
+  controlRate: number
+  nControls: number
+  z: number
+  determinateShare: number
+  margin?: number
+}): (n: number) => boolean {
+  const margin = input.margin ?? POWER_MARGIN
+  const caseRate = Math.min(1, input.controlRate + margin)
+  const controlsReaching = Math.round(input.controlRate * input.nControls)
+
+  return (n: number) => {
+    const determinate = Math.round(n * input.determinateShare)
+    if (determinate === 0) return false
+    const reaching = Math.round(determinate * caseRate)
+    return differenceWithCI(reaching, determinate, controlsReaching, input.nControls, input.z).separated
+  }
+}
+
+// The distance to power, read off the last saved run rather than off a constant.
+// The control arm is not fixed — it grew from 49 publishers to 125 when the pool
+// did — and a requirement quoted against a control arm this study no longer has
+// is a requirement for a different study.
+export function powerDistanceFrom(
+  report: CapabilityControlReport,
+  casePublishers: number
+): PowerDistance {
+  const primary = report.comparisons.find(c => c.unit === PRIMARY_UNIT)!
+  const z = report.endpointZ
+
+  return {
+    fromRun: report.ranAt,
+    nControls: primary.controls.members,
+    z,
+    byCapability: CAPABILITIES.map(capability => {
+      const cases = primary.cases.byCapability.find(c => c.capability === capability)!
+      const controls = primary.controls.byCapability.find(c => c.capability === capability)!
+      const controlRate = controls.overDeterminate.rate ?? 0
+      const nDeterminate = controls.overDeterminate.n
+      const determinateShare = primary.cases.members > 0
+        ? (cases.reached + cases.notReached) / primary.cases.members
+        : 0
+
+      // The ceiling at the case arm this corpus HAS, not at its member count:
+      // a case that answers indeterminate is not a case with an unknown value,
+      // it is a case the comparison never sees.
+      const caseDeterminate = Math.round(casePublishers * determinateShare)
+      const ceiling = smallestDetectableEffect(caseDeterminate, nDeterminate, z)
+      const ceilingRate = nDeterminate > 0 ? ceiling.maxControlsReaching / nDeterminate : 0
+
+      return {
+        capability,
+        controlRate,
+        nDeterminate,
+        determinateShare,
+        publishersNeeded: publishersNeededFor({
+          controlRate, nControls: nDeterminate, z, determinateShare,
+        }),
+        firstSeparating: firstSeparatingN({
+          controlRate, nControls: nDeterminate, z, determinateShare,
+        }),
+        ceiling: ceilingRate,
+        controlRateUnderCeiling: caseDeterminate > 0 && controlRate <= ceilingRate,
+      }
+    }),
+  }
+}
+
+export function casePublisherReport(input: {
+  corpus: LabeledCorpus
+  lastRun?: CapabilityControlReport | null
+}): CasePublisherReport {
+  const cohort = caseCohortOf(input.corpus)
+  const breakdown = publisherBreakdown(cohort.members)
+  const publishers = breakdown.length
+  const packages = new Set(cohort.members.map(m => m.package)).size
+
+  // The lost side is resolved through the same packument read, so a confirmed
+  // removal with no bytes still names its account when the packument survived
+  // it. That is the whole point of counting it: these are accounts A5 would
+  // have had.
+  const lostMembers = cohort.withoutBytes
+    .map(memberOf)
+    .filter((m): m is CohortMember => m !== null)
+  const lostPublishers = new Set(lostMembers.map(m => m.publisher ?? '(not recorded)'))
+  const present = new Set(breakdown.map(b => b.publisher))
+
+  const power = input.lastRun ? powerDistanceFrom(input.lastRun, publishers) : null
+
+  const caveats: string[] = []
+  // Not a hedge. Two of the eight accounts in this arm were shown to be one
+  // operator — same payload, same exfil repo, same hardcoded credential, second
+  // account's first publication 41 minutes after npm removed the first's. See
+  // D8 in docs/audit-a5.md. `publisherOf` resolves an npm account, which is all
+  // a packument can support, so the count is an upper bound and says so.
+  caveats.push(
+    `${publishers} is a count of npm ACCOUNTS and is an UPPER BOUND on the independent events. ` +
+    `A packument cannot establish that two accounts are two people, and on this corpus two of ` +
+    `them are not: see D8 in docs/audit-a5.md, where a shared payload and a shared credential ` +
+    `merge a pair. The same reasoning is why PROMOTION_MIN_TAKEDOWN_PUBLISHERS in watchlist.ts ` +
+    `is a floor rather than a measurement.`
+  )
+  if (cohort.withoutBytes.length > 0) {
+    caveats.push(
+      `${cohort.withoutBytes.length} confirmed removals have no tarball and cannot enter A5 at any n. ` +
+      `They are not a shortage of attacks — see the object store section of docs/audit-a5.md, where a ` +
+      `sweep deleted 3,190 still-referenced objects and took 31 labelled captures with them.`
+    )
+  }
+  if (power) {
+    const blocked = power.byCapability.filter(c => c.determinateShare < 1)
+    if (blocked.length > 0) {
+      caveats.push(
+        `The publisher count is not the only term. ` +
+        `${blocked.length === CAPABILITIES.length ? 'All four capabilities have' : `${blocked.length} of the four capabilities have`} a ` +
+        `case-side determinate share below 1 (` +
+        blocked.map(c => `${c.capability} ${(100 * c.determinateShare).toFixed(0)}%`).join(', ') +
+        `), and an indeterminate case leaves the denominator rather than sitting in it with an unknown ` +
+        `value. Waiting for the case arm to become legible is waiting for the thing being studied to ` +
+        `stop happening, so the requirement column is not a schedule.`
+      )
+    }
+  } else {
+    caveats.push(
+      `No saved capability-control run was found, so there is no control arm to state a requirement ` +
+      `against. Run \`norte-guard capabilities --control\` first; a distance to power quoted against ` +
+      `an invented control n would be arithmetic about a study nobody ran.`
+    )
+  }
+
+  return {
+    confirmedCaptures: cohort.confirmed.length,
+    confirmedWithBytes: cohort.withBytes.length,
+    captures: cohort.members.length,
+    packages,
+    publishers,
+    operators: collapse(cohort.members.map(m => m.publisher)).operators,
+    mergedAccounts: collapse(cohort.members.map(m => m.publisher)).merged,
+    breakdown,
+    unclassifiable: cohort.unclassifiable,
+    excludedByName: cohort.excludedByName,
+    lost: {
+      captures: cohort.withoutBytes.length,
+      packages: new Set(cohort.withoutBytes.map(s => s.package)).size,
+      publishers: lostPublishers.size,
+      publishersOnlyHere: [...lostPublishers].filter(p => !present.has(p)).sort(),
+    },
+    power,
+    caveats,
+  }
+}
+
+// The newest saved run, so the distance to power is quoted against a control arm
+// that existed. Returns null rather than throwing: a corpus with no run yet is
+// the normal state on a fresh checkout, and it is reported as such.
+export function readLatestControlRun(resultsDir: string): CapabilityControlReport | null {
+  if (!existsSync(resultsDir)) return null
+  const files = readdirSync(resultsDir)
+    .filter(f => f.startsWith('capability-control-') && f.endsWith('.json'))
+    .sort()
+  for (const file of files.reverse()) {
+    try {
+      const parsed = JSON.parse(readFileSync(join(resultsDir, file), 'utf-8')) as CapabilityControlReport
+      if (parsed.comparisons?.some(c => c.unit === PRIMARY_UNIT)) return parsed
+    } catch { /* try the one before it */ }
+  }
+  return null
+}
+
+// IDEA 1 AND 2, assembled.
+//
+// Everything here runs at the PRIMARY unit and only at the primary unit. The
+// capability tables are printed at five units because the difference between them
+// was the whole subject of the 2026-08-19 audit; repeating that here would add
+// forty-five more intervals to the family to answer a question that has already
+// been answered, and the answer is that the publisher unit is the one whose
+// members are independent events.
+function opacityReport(
+  cases: MeasuredMember[],
+  controls: MeasuredMember[],
+  z: number
+): CapabilityControlReport['opacity'] {
+  const atPrimary = (m: MeasuredMember[]): MeasuredMember[] => atUnit(m, PRIMARY_UNIT)
+  const caseMembers = atPrimary(cases)
+  const controlMembers = atPrimary(controls)
+
+  const caseProfiles = caseMembers.map(m => m.profile).filter((p): p is ResolutionProfile => p !== null)
+  const controlProfiles = controlMembers.map(m => m.profile).filter((p): p is ResolutionProfile => p !== null)
+
+  const binary: OpacityComparison[] = [
+    compareBinary({
+      measure: 'hides any of its own control flow',
+      unitOfMeasure: `${PRIMARY_UNIT}s whose archive was opened`,
+      cases: caseProfiles, controls: controlProfiles,
+      pick: p => p.hasAuthoredOpacity, z,
+    }),
+    ...AUTHORED_OPACITY.map(reason => compareBinary({
+      measure: reason,
+      unitOfMeasure: `${PRIMARY_UNIT}s whose archive was opened`,
+      cases: caseProfiles, controls: controlProfiles,
+      pick: p => p.bySite[reason] > 0, z,
+    })),
+  ]
+
+  const continuous: ContinuousComparison[] = [
+    compareContinuous({
+      measure: 'import resolution rate',
+      unitOfMeasure: 'resolved modules over resolution attempts',
+      cases: caseProfiles.map(p => p.importResolutionRate).filter((x): x is number => x !== null),
+      controls: controlProfiles.map(p => p.importResolutionRate).filter((x): x is number => x !== null),
+    }),
+    compareContinuous({
+      measure: 'authored opacity sites per file',
+      unitOfMeasure: 'sites / files analysed',
+      cases: caseProfiles.map(p => p.authoredOpacityPerFile).filter((x): x is number => x !== null),
+      controls: controlProfiles.map(p => p.authoredOpacityPerFile).filter((x): x is number => x !== null),
+    }),
+    compareContinuous({
+      measure: 'analyser bound sites per file — OURS, not theirs',
+      unitOfMeasure: 'sites / files analysed',
+      cases: caseProfiles.map(p => p.filesAnalysed > 0 ? p.analyserBoundSites / p.filesAnalysed : NaN),
+      controls: controlProfiles.map(p => p.filesAnalysed > 0 ? p.analyserBoundSites / p.filesAnalysed : NaN),
+    }),
+  ]
+
+  const strictCases = summariseGroup({
+    name: 'confirmed removals, resolved evidence only',
+    unit: PRIMARY_UNIT, members: caseMembers, failures: [], strict: true,
+  })
+  const strictControls = summariseGroup({
+    name: 'size-matched controls, resolved evidence only',
+    unit: PRIMARY_UNIT, members: controlMembers, failures: [], strict: true,
+  })
+
+  const demotedIn = (members: MeasuredMember[], capability: Capability): number =>
+    members.filter(m => m.answers[capability] === 'reached' && m.strict[capability] !== 'reached').length
+
+  return {
+    note:
+      'The four capabilities saturated, so the walk\'s own record of where it LOST THE TRAIL is ' +
+      'read here as a measurement rather than as a reason to answer indeterminate. Only the four ' +
+      'AUTHORED kinds are counted against a package — a specifier, an eval, a computed member or a ' +
+      'callee that exists only at runtime. The analyser\'s own bounds are counted too and reported ' +
+      'apart, because a budget this project chose is not something a package did. ' +
+      'TWO CONFOUNDS, NAMED RATHER THAN CONTROLLED. First, the denominator here is publishers whose ' +
+      'archive HELD JAVASCRIPT: a member that was never opened has no resolution rate, and scoring ' +
+      'it as hiding nothing would put "we did not look" and "it is transparent" in one bucket. The ' +
+      'control side loses more members to that than the case side does, so the two arms are not the ' +
+      'same denominators the capability tables use, and the counts are printed for both. Second, ' +
+      'MINIFICATION PRODUCES AUTHORED OPACITY BY CONSTRUCTION and minification is ordinary practice. ' +
+      'A difference on these measures is therefore not yet a difference about malice; it is a ' +
+      'difference about legibility, and separating the two needs a minified-only stratum this ' +
+      'cohort is too small to cut.',
+    unit: PRIMARY_UNIT,
+    endpointsAdded: OPACITY_ENDPOINTS,
+    binary,
+    continuous,
+    withoutProfile: {
+      cases: caseMembers.length - caseProfiles.length,
+      controls: controlMembers.length - controlProfiles.length,
+    },
+    strict: {
+      note:
+        'The same four, counting only evidence a reader can check: a module resolved by name, or an ' +
+        'ambient call the parser read. A frozen `reached` resting on a lost specifier becomes ' +
+        'indeterminate, never not-reached — failing to read a specifier is not evidence that it does ' +
+        'not reach. ' +
+        'THIS DEFINITION WAS WRITTEN AFTER THE FROZEN RUN SATURATED, WHICH IS THE ONE THING THAT ' +
+        'DISQUALIFIES IT AS EVIDENCE FROM THIS RUN. It is reported for exactly the reason the ' +
+        'post-hoc credential_read block is: so that the next confirmed sample nobody has opened can ' +
+        'be the test of it, rather than the third place it is rediscovered. Whatever it separates ' +
+        'here is a HYPOTHESIS THIS RUN GENERATED, not a finding this run established, and the ' +
+        'Bonferroni correction over 29 endpoints does not fix that — it covers the intervals inside ' +
+        'one run, not the number of times one cohort of 8 publishers has now been looked at.',
+      cases: strictCases,
+      controls: strictControls,
+      capabilities: compareAt(strictCases, strictControls, z),
+      demoted: CAPABILITIES.map(capability => ({
+        capability,
+        cases: demotedIn(caseMembers, capability),
+        controls: demotedIn(controlMembers, capability),
+      })),
+    },
+  }
+}
+
 function publisherBreakdown(members: CohortMember[]): Array<{ publisher: string; packages: string[]; captures: number }> {
   const byPublisher = new Map<string, { packages: Set<string>; captures: number }>()
   for (const m of members) {
@@ -1224,7 +1871,7 @@ const pct = (n: number, of: number): string => of === 0 ? 'n/a' : `${(100 * n / 
 // established" sat below it, with the caveat explaining the difference eleven
 // paragraphs further down. Nobody reads that way. The primary unit leads, the
 // pseudo-replicated unit goes last, and the reason travels with it.
-export const PRINT_ORDER: Unit[] = ['publisher', 'publisher-any', 'package', 'package-any', 'capture']
+export const PRINT_ORDER: Unit[] = ['operator', 'publisher', 'publisher-any', 'package', 'package-any', 'capture']
 
 export interface Headline {
   unit: Unit
@@ -1323,13 +1970,26 @@ function caveatsFor(cases: MeasuredMember[], controls: MeasuredMember[], matches
   const caveats: string[] = []
 
   const publishers = new Set(cases.map(c => c.member.publisher ?? c.member.package))
+  const linked = collapse(cases.map(c => c.member.publisher))
   caveats.push(
     `The case side is ${cases.length} captures of ${new Set(cases.map(c => c.member.package)).size} packages ` +
-    `published by ${publishers.size} npm accounts. Every interval here assumes independent draws and there ` +
-    `are ${publishers.size} independent events in it, so every one of them is narrower than the truth. The ` +
-    `publisher-unit rows are the ones to read; the capture-unit rows are printed to show how much the ` +
-    `unit changes the answer, not as a second measurement.`
+    `published by ${publishers.size} npm accounts, which are ${linked.operators} OPERATORS: ` +
+    (linked.merged.length > 0
+      ? linked.merged.map(m => `${m.accounts.join(' = ')}`).join('; ') + '. '
+      : 'no account has been linked to another. ') +
+    `Every interval here assumes independent draws and there are ${linked.operators} independent events ` +
+    `in it, not ${publishers.size}, so every one of them is narrower than the truth. The operator-unit rows ` +
+    `are the ones to read; the publisher rows are kept so runs before 2026-08-21 stay comparable, and the ` +
+    `capture-unit rows are printed to show how much the unit changes the answer, not as a second measurement.`
   )
+
+  // The evidence for each merge, in the output rather than only in the source.
+  // Collapsing two accounts into one removes a degree of freedom from every
+  // interval in the run, so a reader has to be able to disagree with it here.
+  for (const merged of linked.merged) {
+    const link = linkFor(merged.accounts[0]!)
+    if (link) caveats.push(`${merged.accounts.join(' = ')} are one operator: ${link.because}`)
+  }
 
   const opaque = cases.filter(c => c.scan.opaqueExecutable).length
   if (opaque > 0) {

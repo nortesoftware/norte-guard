@@ -24,11 +24,14 @@ import {
 } from '../src/capabilities.js'
 import {
   matchOnSize, atUnit, smallestDetectableEffect, summariseGroup, compareAt, verdictFor,
-  publisherOf, isTrustedPublisherIdentity, worstRatioOver,
+  publisherOf, isTrustedPublisherIdentity, worstRatioOver, publishersNeededFor, OPACITY_ENDPOINTS,
   INSPIRED_THE_CLASS, MATCH_RATIO, SIZE_CALIPER_LOG10, EQUIVALENCE_MARGIN, UNITS, PRIMARY_UNIT,
+  PREVIOUS_PRIMARY_UNIT,
   type CohortMember, type MeasuredMember,
 } from '../src/capability-control.js'
 import { zForFamily } from '../src/stats.js'
+import { AUTHORED_OPACITY } from '../src/import-opacity.js'
+import { operatorOf, linkFor, collapse, KNOWN_OPERATORS } from '../src/operator.js'
 
 // One file, analysed as a package with that file as its entry point. Everything
 // below is a statement about a package, because a capability is.
@@ -385,6 +388,8 @@ describe('the unit of analysis is chosen, not inherited from the directory count
     scan: { capabilities: { answers: [], externalModules: [], secretPathGrepOnly: 0, secretPathsReached: [], tokenEnvRead: [], namelessEnvRead: false }, reachability: null, refusal: null, parseableFiles: 0, sourceBytes: 0, opaqueExecutable: false, opaqueKinds: [] },
     answers: { credential_read: 'not-reached', network_egress: 'not-reached', external_exec: 'not-reached', dynamic_code: 'not-reached' },
     repaired: { credential_read: 'not-reached', network_egress: 'not-reached', external_exec: 'not-reached', dynamic_code: 'not-reached' },
+    strict: { credential_read: 'not-reached', network_egress: 'not-reached', external_exec: 'not-reached', dynamic_code: 'not-reached' },
+    profile: null,
   })
 
   const members = [
@@ -407,8 +412,125 @@ describe('the unit of analysis is chosen, not inherited from the directory count
   })
 
   it('the primary unit is the one with the fewest assumptions in it', () => {
-    expect(PRIMARY_UNIT).toBe('publisher')
+    // Was `publisher` until 2026-08-21, on the reasoning that an account is an
+    // independent decision. The corpus refuted it: ferrousdev, wokorc and
+    // corssdev share a package.json field order no other publisher in 10,192
+    // names uses, and ran the same two-tier dependency structure four times in
+    // 28.6 hours. A5 had been counting the first two as two independent events.
+    expect(PRIMARY_UNIT).toBe('operator')
+    expect(PREVIOUS_PRIMARY_UNIT).toBe('publisher')
     expect(UNITS).toContain('capture')
+    // Kept in the output, not replaced: every run before that date reported the
+    // publisher unit and a reader comparing against them needs the same number.
+    expect(UNITS).toContain('publisher')
+  })
+
+  it('the operator unit is never coarser than the publisher unit by accident', () => {
+    // An account with no declared link is its own operator, so the two units can
+    // only differ where a merge has been written down with its evidence.
+    expect(operatorOf('nobody-has-linked-this-account')).toBe('nobody-has-linked-this-account')
+    expect(operatorOf('ferrousdev')).toBe(operatorOf('wokorc'))
+    expect(operatorOf('ferrousdev')).toBe(operatorOf('corssdev'))
+    expect(operatorOf(null)).toBeNull()
+  })
+
+  it('every declared link carries the evidence that establishes it', () => {
+    // A merge that turns out to be wrong costs a degree of freedom the analysis
+    // cannot get back, so a link with no stated reason must not be addable.
+    for (const link of KNOWN_OPERATORS) {
+      expect(link.accounts.length).toBeGreaterThan(1)
+      expect(link.evidence.length).toBeGreaterThan(0)
+      expect(link.because.length).toBeGreaterThan(120)
+      for (const account of link.accounts) {
+        expect(linkFor(account)).toBe(link)
+      }
+    }
+  })
+
+  it('collapses the accounts it links and leaves the rest alone', () => {
+    const c = collapse(['ferrousdev', 'wokorc', 'corssdev', 'siwatfa', 'whltd4', null])
+    expect(c.accounts).toBe(5)
+    expect(c.operators).toBe(3)
+    expect(c.merged).toHaveLength(1)
+    expect(c.merged[0]!.accounts).toEqual(['corssdev', 'ferrousdev', 'wokorc'])
+  })
+
+  // Adding an endpoint without widening the correction is how "we tried nine
+  // things and one separated" comes to read as a finding. The constant is
+  // declared beside the other pre-run constants; this is what stops it drifting
+  // from the number of intervals the run actually prints.
+  it('the opacity endpoints are declared, and the family is widened by exactly them', () => {
+    // 5 binary measures (any authored opacity + the four authored kinds) and
+    // 4 strict-capability comparisons, all at the primary unit only.
+    expect(OPACITY_ENDPOINTS).toBe(AUTHORED_OPACITY.length + 1 + CAPABILITIES.length)
+    // And the widened family is strictly more conservative than the old one.
+    expect(zForFamily(UNITS.length * CAPABILITIES.length + OPACITY_ENDPOINTS))
+      .toBeGreaterThan(zForFamily(UNITS.length * CAPABILITIES.length))
+  })
+
+  // The defect this pins: `atUnit` unioned the ANSWERS at the `-any` units and
+  // kept the earliest capture's scan, so every scan-derived counter in
+  // summariseGroup described one capture at a unit whose contract is "ever, in
+  // the window". It undercounted opacity on the run of 2026-08-21 — three case
+  // packages ship an opaque executable, from three accounts, and publisher-any
+  // printed two, because rihannasmith's earliest capture is the readable one.
+  describe('the -any fold reaches the scan, not only the answers', () => {
+    const withScan = (
+      name: string, at: string, publisher: string,
+      scan: Partial<MeasuredMember['scan']>
+    ): MeasuredMember => {
+      const base = measured(name, at, publisher)
+      return { ...base, scan: { ...base.scan, ...scan } }
+    }
+
+    const opaqueLater = [
+      withScan('readable', '2026-08-15T01:00:00Z', 'rihannasmith', {}),
+      withScan('minified', '2026-08-15T02:00:00Z', 'rihannasmith', {
+        opaqueExecutable: true, opaqueKinds: ['minified'],
+      }),
+    ]
+
+    it('opacity is a demonstration: any capture of the unit carries it', () => {
+      expect(atUnit(opaqueLater, 'publisher')[0]!.scan.opaqueExecutable).toBe(false)
+      expect(atUnit(opaqueLater, 'publisher-any')[0]!.scan.opaqueExecutable).toBe(true)
+      expect(atUnit(opaqueLater, 'publisher-any')[0]!.scan.opaqueKinds).toContain('minified')
+    })
+
+    it('never opened is a failure to look: it takes EVERY capture, not any', () => {
+      const oneRefused = [
+        withScan('refused', '2026-08-15T01:00:00Z', 'acct', { refusal: 'no JavaScript in the archive' }),
+        withScan('read', '2026-08-15T02:00:00Z', 'acct', { refusal: null }),
+      ]
+      expect(atUnit(oneRefused, 'publisher')[0]!.scan.refusal).not.toBeNull()
+      expect(atUnit(oneRefused, 'publisher-any')[0]!.scan.refusal).toBeNull()
+
+      const allRefused = [
+        withScan('a', '2026-08-15T01:00:00Z', 'acct', { refusal: 'no JavaScript in the archive' }),
+        withScan('b', '2026-08-15T02:00:00Z', 'acct', { refusal: 'past the size bound' }),
+      ]
+      expect(atUnit(allRefused, 'publisher-any')[0]!.scan.refusal).not.toBeNull()
+    })
+
+    it('the two halves of credential_read union, so evidence is not lost to ordering', () => {
+      const evidence = [
+        withScan('first', '2026-08-15T01:00:00Z', 'acct', {}),
+        withScan('second', '2026-08-15T02:00:00Z', 'acct', {
+          capabilities: {
+            answers: [], externalModules: ['axios'], secretPathGrepOnly: 0,
+            secretPathsReached: ['.npmrc'], tokenEnvRead: ['NPM_TOKEN'], namelessEnvRead: false,
+          },
+        }),
+      ]
+      const folded = atUnit(evidence, 'publisher-any')[0]!.scan.capabilities
+      expect(folded.secretPathsReached).toEqual(['.npmrc'])
+      expect(folded.tokenEnvRead).toEqual(['NPM_TOKEN'])
+      expect(folded.externalModules).toEqual(['axios'])
+    })
+
+    it('leaves the earliest-capture units alone: the primary unit did not change', () => {
+      expect(atUnit(opaqueLater, 'publisher')[0]!.member.capturedAt).toBe('2026-08-15T01:00:00Z')
+      expect(atUnit(opaqueLater, 'package').map(m => m.member.package)).toEqual(['readable', 'minified'])
+    })
   })
 })
 
@@ -422,6 +544,37 @@ describe('what the run could have found is computed before what it did', () => {
   it('says so plainly when nothing at all is detectable', () => {
     const power = smallestDetectableEffect(1, 2, zForFamily(12))
     expect(power.statement).toContain('NOTHING IS DETECTABLE HERE')
+  })
+
+  // The requirement `corpus --publishers` prints. It is the number that decides
+  // when A5 is worth re-running, so the direction of every term is pinned here:
+  // getting it backwards would make the study look reachable when it is not.
+  describe('the publishers a difference would need', () => {
+    const z = zForFamily(20)
+
+    it('a case arm that answers half the time needs more accounts than one that always answers', () => {
+      const always = publishersNeededFor({ controlRate: 0.16, nControls: 125, z, determinateShare: 1 })
+      const half = publishersNeededFor({ controlRate: 0.16, nControls: 125, z, determinateShare: 0.5 })
+      expect(always).not.toBeNull()
+      expect(half).not.toBeNull()
+      expect(half!).toBeGreaterThan(always!)
+    })
+
+    it('a commoner control rate needs more accounts, because the gap is harder to see', () => {
+      const rare = publishersNeededFor({ controlRate: 0.06, nControls: 125, z, determinateShare: 1 })
+      const common = publishersNeededFor({ controlRate: 0.33, nControls: 125, z, determinateShare: 1 })
+      expect(common!).toBeGreaterThan(rare!)
+    })
+
+    it('a case arm that never answers has no requirement, not a small one', () => {
+      expect(publishersNeededFor({ controlRate: 0.16, nControls: 125, z, determinateShare: 0 })).toBeNull()
+    })
+
+    it('the margin is the effect being asked about: a smaller one costs more accounts', () => {
+      const wide = publishersNeededFor({ controlRate: 0.16, nControls: 125, z, determinateShare: 1, margin: 0.30 })
+      const narrow = publishersNeededFor({ controlRate: 0.16, nControls: 125, z, determinateShare: 1, margin: 0.10 })
+      expect(narrow === null || narrow > wide!).toBe(true)
+    })
   })
 
   it('a comparison with an empty denominator is not calculable, not zero', () => {
