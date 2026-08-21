@@ -21,6 +21,10 @@ import { DEFAULT_THRESHOLDS } from './types.js'
 import { formatRateWithCI, rateWithCI, scoreDistribution, pct, type RateWithCI, type ScoreDistribution } from './stats.js'
 import { tallySignals, renderPartition, reportBugs, type SignalRef } from './signal-report.js'
 import { fabricatedProfile } from './fabricated-profile.js'
+import { loadCorpus, type CorpusSample } from './corpus.js'
+import { capturePackument } from './size-control.js'
+import { withdrawnPackages } from './capability-control.js'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import {
   saveArtifact,
   engineVersion,
@@ -917,10 +921,303 @@ export function buildArtifact(input: {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The class-matched arm
+// ---------------------------------------------------------------------------
+
+// A DEFECT OF THIS BENCHMARK, not of any one signal.
+//
+// Everything above harvests by keyword and ranks by weekly downloads, so the
+// sample is the well-maintained middle of the registry: long histories, real
+// repositories, megabytes of code. That is the right population for asking
+// whether a gate is liveable, and it is the WRONG population for any signal
+// restricted to the observed class — `young` under seven days, `tiny` under
+// 100KB, `!hasRepository`. A popular package satisfies none of the three, so a
+// class-restricted signal cannot fire on this corpus at all, and its
+// false-positive rate comes back 0.0% by construction.
+//
+// That is not a passing grade. It is the benchmark declining to answer, and it
+// would auto-approve any such signal put in front of it. The failure was found
+// by proposing exactly that: two signals whose FP would not have moved here, one
+// of which has a recall of 0 of 26 against confirmed removals.
+//
+// The population where a class-restricted signal CAN fire is the quarantine pool
+// itself — captures the filter kept because they matched the class, minus every
+// one npm subsequently withdrew. This arm scores those.
+//
+// "NOT WITHDRAWN" IS NOT "BENIGN", and the direction of that error is worth
+// stating because it decides how to read the number. A package npm removes
+// tomorrow is in this arm today, so a genuine detection lands here as a false
+// positive. The measured rate is therefore an OVER-estimate of the FP rate, and
+// a signal that looks clean here is clean under a pessimistic reading. The same
+// union of removal records the capability run uses is subtracted first.
+export interface ClassArmOptions {
+  roots?: string[]
+  outputDir?: string
+  captureReason?: string
+  limit?: number
+  resultsDir?: string
+  save?: boolean
+}
+
+// Restricted to one capture reason for the same reason D11 gave the capability
+// run a `--control-class`: the two capture reasons select different populations,
+// and `quarantine-no-genome` is the one that IS the observed class.
+export const CLASS_ARM_REASON = 'quarantine-no-genome'
+
+export interface ClassArmPool {
+  scored: CorpusSample[]
+  inReason: number
+  withdrawnRemoved: number
+  confirmedRemoved: number
+  noDownloadsRecorded: number
+}
+
+export function selectClassPool(options: ClassArmOptions): ClassArmPool {
+  const corpus = loadCorpus(options.roots)
+  const reason = options.captureReason ?? CLASS_ARM_REASON
+  const removed = withdrawnPackages(options.outputDir ?? './norte-guard-captures', corpus.samples).names
+
+  const inReason = corpus.samples.filter(s => !s.contaminated && s.captureReason === reason)
+
+  const confirmed = inReason.filter(s => s.label === 'confirmed_malicious')
+  const survived = inReason.filter(
+    s => s.label !== 'confirmed_malicious' && !removed.has(s.package)
+  )
+
+  // One capture per package. A package captured forty times is one package, and
+  // letting it bring forty rows would let a single republisher decide the rate.
+  const byPackage = new Map<string, CorpusSample>()
+  for (const s of survived) {
+    const seen = byPackage.get(s.package)
+    if (!seen || s.capturedAt < seen.capturedAt) byPackage.set(s.package, s)
+  }
+  const unique = [...byPackage.values()].sort((a, b) => a.capturedAt.localeCompare(b.capturedAt))
+  const scored = options.limit === undefined ? unique : unique.slice(0, options.limit)
+
+  return {
+    scored,
+    inReason: inReason.length,
+    withdrawnRemoved: inReason.length - confirmed.length - survived.length,
+    confirmedRemoved: confirmed.length,
+    noDownloadsRecorded: scored.filter(s => s.weeklyDownloads === undefined || s.weeklyDownloads === null).length,
+  }
+}
+
+// Scored from the CAPTURED packument, never from the registry today.
+//
+// The live document for a package this young has already grown versions the
+// watcher never saw, and for a withdrawn one it holds nothing at all — so a
+// network fetch here would score a different package from the one the filter
+// decided about. This is the same rule `memberOf` follows in capability-control.
+export function analyzeStoredCapture(sample: CorpusSample): FpBenchRow {
+  const downloads = sample.weeklyDownloads ?? 0
+  const emptyMode = (): ModeOutcome => ({ verdict: 'ERROR', score: 0, regime: 'unknown', signals: [], versions: 0 })
+  const empty: FpBenchRow = {
+    package: sample.package,
+    downloads,
+    gate: emptyMode(),
+    audit: emptyMode(),
+  }
+
+  const packument = capturePackument(sample.ngpackPath)
+  if (!packument) return { ...empty, error: 'no packument in the capture' }
+
+  const currentMeta = packument.versions[sample.version]
+  if (!currentMeta) return { ...empty, error: `version ${sample.version} missing from the captured packument` }
+
+  const genome = buildGenomeFromPackument(sample.package, packument)
+
+  const toOutcome = (r: ReturnType<typeof scoreWithRegime>): ModeOutcome => ({
+    verdict: r.verdict,
+    score: r.totalScore,
+    regime: r.regime,
+    signals: r.signals.map(s => ({ type: s.type, score: s.score })),
+    versions: genome.versionsAnalyzed,
+  })
+
+  // undefined, not 0, when the week was never recorded: npm serves one complete
+  // week at a time, so a snapshot taken without it can never be re-judged, and a
+  // zero there is a fact about the package rather than about the record.
+  const weeklyDownloads = sample.weeklyDownloads ?? undefined
+
+  const gate = scoreWithRegime({
+    packument, version: sample.version, currentMeta, genome,
+    weeklyDownloads, config: DEFAULT_THRESHOLDS.gate,
+  })
+  const audit = scoreWithRegime({
+    packument, version: sample.version, currentMeta, genome,
+    weeklyDownloads, config: DEFAULT_THRESHOLDS.audit,
+  })
+
+  const profile = fabricatedProfile({
+    packument, currentMeta, regime: gate.regime, weeklyDownloads,
+  })
+
+  return {
+    package: sample.package,
+    downloads,
+    gate: toOutcome(gate),
+    audit: toOutcome(audit),
+    fabricatedProfile: {
+      matches: profile.matches,
+      localConjuncts:
+        profile.conjuncts.noGenome && profile.conjuncts.youngName &&
+        profile.conjuncts.tiny && profile.conjuncts.noRepository,
+      conjuncts: profile.conjuncts,
+    },
+  }
+}
+
+// Deliberately NOT saved through `saveArtifact`. That shape carries the harvest
+// queries, the download deciles and the pool sizes of the popularity arm, and
+// filling those with nulls for a run that never made a registry request would
+// produce an artifact that compares against the wrong thing. The two arms
+// measure different populations and are stored as different files.
+export interface ClassArmArtifact {
+  engineVersion: string
+  arm: 'class-matched'
+  captureReason: string
+  pool: {
+    scored: number
+    inReason: number
+    withdrawnRemoved: number
+    confirmedRemoved: number
+    noDownloadsRecorded: number
+  }
+  fabricatedProfile: {
+    fullConjunction: RateWithCI
+    localConjuncts: RateWithCI
+  }
+  gate: { nonPass: RateWithCI; unevaluated: RateWithCI; blocked: number; warned: number; insufficientHistory: number }
+  audit: { nonPass: RateWithCI; unevaluated: RateWithCI; blocked: number; warned: number; insufficientHistory: number }
+  packages: Array<{ package: string; gate: string; audit: string; fabricatedProfile: boolean }>
+}
+
+export function buildClassArmArtifact(input: {
+  rows: FpBenchRow[]
+  gate: ModeSummary
+  audit: ModeSummary
+  pool: ClassArmPool
+  captureReason: string
+}): ClassArmArtifact {
+  const usable = input.rows.filter(r => !r.error)
+  const full = usable.filter(r => r.fabricatedProfile?.matches).length
+  const local = usable.filter(r => r.fabricatedProfile?.localConjuncts).length
+  const modeOf = (s: ModeSummary) => ({
+    nonPass: s.nonPassRate,
+    unevaluated: s.unevaluatedRate,
+    blocked: s.blocked,
+    warned: s.warned,
+    insufficientHistory: s.insufficientHistory,
+  })
+
+  return {
+    engineVersion: engineVersion(),
+    arm: 'class-matched',
+    captureReason: input.captureReason,
+    pool: {
+      scored: input.pool.scored.length,
+      inReason: input.pool.inReason,
+      withdrawnRemoved: input.pool.withdrawnRemoved,
+      confirmedRemoved: input.pool.confirmedRemoved,
+      noDownloadsRecorded: input.pool.noDownloadsRecorded,
+    },
+    fabricatedProfile: {
+      fullConjunction: rateWithCI(full, usable.length),
+      localConjuncts: rateWithCI(local, usable.length),
+    },
+    gate: modeOf(input.gate),
+    audit: modeOf(input.audit),
+    packages: usable.map(r => ({
+      package: r.package,
+      gate: r.gate.verdict,
+      audit: r.audit.verdict,
+      fabricatedProfile: r.fabricatedProfile?.matches ?? false,
+    })),
+  }
+}
+
+export function runClassMatchedFpBench(options: ClassArmOptions = {}): {
+  rows: FpBenchRow[]
+  gate: ModeSummary
+  audit: ModeSummary
+  pool: ClassArmPool
+  artifact: ClassArmArtifact
+  artifactPath: string | null
+} {
+  const pool = selectClassPool(options)
+
+  console.log(`\nnorte-guard fp-bench: CLASS-MATCHED arm, offline\n`)
+  console.log(`  ${pool.inReason} captures with captureReason=${options.captureReason ?? CLASS_ARM_REASON}`)
+  console.log(`  ${pool.confirmedRemoved} confirmed_malicious removed`)
+  console.log(`  ${pool.withdrawnRemoved} withdrawn removed (npm took the name down)`)
+  console.log(`  ${pool.scored.length} packages scored, one capture each`)
+  if (pool.noDownloadsRecorded > 0) {
+    console.log(`  ${pool.noDownloadsRecorded} of them have no recorded download week`)
+  }
+  console.log()
+
+  const rows = pool.scored.map(analyzeStoredCapture)
+  const failed = rows.filter(r => r.error)
+  if (failed.length > 0) {
+    console.log(`${failed.length} captures could not be scored (excluded from the denominator)\n`)
+  }
+
+  const gate = summarize(rows, 'gate')
+  const audit = summarize(rows, 'audit')
+  renderSummary(gate, rows)
+  renderSummary(audit, rows)
+
+  console.log('\n' + '-'.repeat(70))
+  console.log(`${BOLD}WHAT THIS ARM IS AND IS NOT${RESET}`)
+  console.log(
+    '  This is the population a class-restricted signal can actually fire in. The\n' +
+    '  popularity-ranked arm cannot: a popular package is not young, not tiny and\n' +
+    '  has a repository, so a signal gated on the observed class scores 0.0% there\n' +
+    '  whatever it does, and the benchmark would approve it by declining to answer.\n' +
+    '\n' +
+    '  "Not withdrawn" is not "benign". A package npm removes tomorrow is in this\n' +
+    '  arm today and its detection counts here as a false positive, so this rate is\n' +
+    '  an OVER-estimate. A signal that looks clean here is clean pessimistically.\n' +
+    '\n' +
+    '  The pool is this collector\'s capture filter, not npm. It is an enriched\n' +
+    '  population by construction and no rate here transfers to the registry.'
+  )
+  console.log('-'.repeat(70))
+
+  const artifact = buildClassArmArtifact({
+    rows, gate, audit, pool,
+    captureReason: options.captureReason ?? CLASS_ARM_REASON,
+  })
+
+  let artifactPath: string | null = null
+  if (options.save ?? true) {
+    const dir = options.resultsDir ?? 'fp-bench-results'
+    mkdirSync(dir, { recursive: true })
+    artifactPath = `${dir}/class-matched-v${artifact.engineVersion}.json`
+    writeFileSync(artifactPath, JSON.stringify(artifact, null, 2))
+    console.log(`\nResults saved to ${artifactPath}`)
+  }
+
+  return { rows, gate, audit, pool, artifact, artifactPath }
+}
+
 // Only when invoked directly, so importing the module for its types does not
 // kick off a thousand registry requests.
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const arg = (flag: string) => process.argv.find(a => a.startsWith(`--${flag}=`))?.split('=')[1]
+
+  if (process.argv.includes('--class-matched')) {
+    runClassMatchedFpBench({
+      outputDir: arg('output'),
+      captureReason: arg('control-class'),
+      limit: arg('limit') === undefined ? undefined : Number(arg('limit')),
+      resultsDir: arg('results-dir'),
+      save: !process.argv.includes('--no-save'),
+    })
+    process.exit(0)
+  }
 
   runFalsePositiveBench({
     top: Number(arg('top') ?? 500),

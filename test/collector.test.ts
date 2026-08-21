@@ -13,6 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { gzipSync } from 'node:zlib'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { wilsonInterval } from '../src/stats.js'
 
 import { classifyGhostReversion, compareVersions } from '../src/genome.js'
 import { platformFamily, PlatformFamilyTracker } from '../src/platform-family.js'
@@ -1459,9 +1460,15 @@ describe('promotion criterion and dated review', () => {
   it('the rate is one broken package a day at the measured flow, and says how far off it is', () => {
     expect(PROMOTION_MAX_FALSE_POSITIVE_RATE)
       .toBeCloseTo(PROMOTION_MAX_FALSE_POSITIVES_PER_DAY / MEASURED_FLAGGED_PER_DAY, 10)
-    // With nothing observed, the bar is a sample size and nothing else.
-    expect(minimumTrackedFor(0)).toBeGreaterThan(1500)
-    expect(minimumTrackedFor(0)).toBeLessThan(2500)
+    // With nothing observed, the bar is a sample size and nothing else. Pinned
+    // exactly rather than to a range: the range was 1500-2500, and a comment
+    // above the constant claimed 1,829 for eight days because both numbers fit
+    // inside it. A criterion this project states in prose has to be the one its
+    // own code computes, and the only way to hold that is to pin the value.
+    expect(minimumTrackedFor(0)).toBe(2332)
+    // And it is the SMALLEST such n — one fewer does not clear the ceiling.
+    expect(wilsonInterval(0, 2332).high).toBeLessThanOrEqual(PROMOTION_MAX_FALSE_POSITIVE_RATE)
+    expect(wilsonInterval(0, 2331).high).toBeGreaterThan(PROMOTION_MAX_FALSE_POSITIVE_RATE)
     // More observed failures means a larger sample, never a smaller one.
     expect(minimumTrackedFor(1)).toBeGreaterThan(minimumTrackedFor(0))
   })

@@ -17,6 +17,7 @@ import {
   fetchAbbreviatedPackument,
   normalizePackument,
   type Packument,
+  type VersionMeta,
 } from './packument.js'
 import { buildGenomeFromPackument, detectGhostVersions, classifyGhostReversion } from './genome.js'
 import { sortedVersions } from './packument.js'
@@ -25,6 +26,14 @@ import { scoreWithRegime } from './scorer.js'
 import { createNgpack, writeCaptureMetadata, labelCapture, type CaptureComposition } from './ngpack.js'
 import { NPM_SECURITY_HOLDER } from './takedown.js'
 import { fetchWeeklyDownloadsWindow } from './downloads.js'
+import {
+  loadQueue, saveQueue, enqueue, due, recordAttempt, recordPermanentLoss,
+  isRetryable, RETRY_SCHEDULE_SECONDS, type QueueState, type RetryOrigin,
+} from './retry-queue.js'
+import {
+  declaredDependencies, truncatedFollow, shouldCaptureDependency,
+  MAX_FOLLOWED_PER_CAPTURE, sameScope, offRegistryDependencies, type DependencyCandidate,
+} from './dependency-capture.js'
 import { classifyPublication, compactMarkers, YOUNG_NAME_DAYS, TINY_PACKAGE_BYTES, type ClassMarkers } from './observed-class.js'
 import { windowCovers } from './fabricated-profile.js'
 import { rotateLogs } from './log-rotation.js'
@@ -204,6 +213,23 @@ const coverage = {
     accepted: 0,
   },
   unreachableByReason: {} as Record<string, number>,
+  // The 404 retry queue, and what it recovered. A 404 on first fetch used to be
+  // terminal: 6,892 announced packages were never analysed at all because of it.
+  retryQueued: 0,
+  retryRecovered: 0,
+  retryExhausted: 0,
+  // Dependencies captured on the strength of who declared them, not their own
+  // profile. See dependency-capture.ts: the lock family's five decoys were all
+  // captured and the one package they all depended on was rejected.
+  dependenciesFollowed: 0,
+  dependenciesCaptured: 0,
+  dependencyFollowTruncated: 0,
+  // Same-scope siblings: captured, packument kept, tarball declined. Counted
+  // apart from the size refusals because they are a different decision.
+  dependencySameScope: 0,
+  // Dependencies pointing off the registry entirely — a URL, a git remote, a
+  // path. Cannot be followed, so counted and named instead.
+  offRegistryDependencies: 0,
 }
 
 // The age of the name, which is what decides whether a package is in the class
@@ -418,7 +444,7 @@ function checkDisappearances(dir: string, name: string, p: Packument): void {
   knownVersions.set(name, currentVersions)
 }
 
-async function analyzePackage(
+export async function analyzePackage(
   name: string,
   config: WatcherConfig,
   feedPubDate: string,
@@ -664,6 +690,12 @@ async function analyzePackage(
         })
 
         if (family.family) familyTracker.recordCapture(family.family, `${name}@${latestVersion}`, now)
+
+        // Whatever this package declares, followed now rather than never. The
+        // five decoys of the lock family were all captured by the rule above and
+        // the one package they all depend on was rejected by it — 664KB with a
+        // repository, so not the class. See dependency-capture.ts.
+        await followDependencies(config, name, latestVersion, currentMeta)
 
         const bytes = directorySize(dir)
         budget?.recordCapture(bytes)
@@ -914,6 +946,14 @@ async function runChangesFeed(config: WatcherConfig): Promise<void> {
 
   // 'now' rather than 0 on a first run: since=0 replays millions of documents.
   // Resuming runs start from the persisted cursor and lose nothing.
+  retryQueue = loadQueue(config.outputDir)
+  if (retryQueue.entries.length > 0) {
+    console.log(
+      `Retry queue: ${retryQueue.entries.length} publications carried over from the last run ` +
+      `(schedule ${RETRY_SCHEDULE_SECONDS.join('s / ')}s)`
+    )
+  }
+
   const resumed = loadLastSeq(config.outputDir)
   const since: Seq | 'now' = resumed ?? 'now'
 
@@ -1000,7 +1040,10 @@ async function runChangesFeed(config: WatcherConfig): Promise<void> {
       coverage.feedEntries++
       budget?.rollIfNewDay()
       await handleChange(event, config, publishWindowMs)
-      if (coverage.changes % 100 === 0) reportCoverage()
+      if (coverage.changes % 100 === 0) {
+        reportCoverage()
+        await drainRetries(config)
+      }
     },
 
     onPage: async events => {
@@ -1024,6 +1067,7 @@ async function runChangesFeed(config: WatcherConfig): Promise<void> {
       )
 
       reportCoverage()
+      await drainRetries(config)
     },
   })
 }
@@ -1310,6 +1354,9 @@ async function handleChange(
       const reason = classifyFetchFailure(e)
       countUnreachable(reason)
       logChange(config.outputDir, event, 'unreachable', undefined, reason)
+      // Not the end of it any more. See retry-queue.ts: this branch used to be
+      // terminal and it cost 6,892 announced packages.
+      queueForRetry(config, event.id, event.seq, reason)
       return
     }
 
@@ -1334,6 +1381,9 @@ async function handleChange(
       const reason = classifyFetchFailure(e)
       countUnreachable(reason)
       logChange(config.outputDir, event, 'unreachable', undefined, reason)
+      // Not the end of it any more. See retry-queue.ts: this branch used to be
+      // terminal and it cost 6,892 announced packages.
+      queueForRetry(config, event.id, event.seq, reason)
       return
     }
   }
@@ -1400,7 +1450,231 @@ export function classifyFetchFailure(error: unknown): UnreachableReason {
   return 'other'
 }
 
+// ---------------------------------------------------------------------------
+// The 404 retry queue
+// ---------------------------------------------------------------------------
+
+// Loaded once per run and written back after every drain, so a restart resumes
+// the queue instead of forgetting what it was going back for. See
+// retry-queue.ts for why a first-fetch 404 is not an answer.
+let retryQueue: QueueState = { entries: [], dropped: 0 }
+
+function queueForRetry(
+  config: WatcherConfig,
+  name: string,
+  seq: number | string,
+  reason: UnreachableReason,
+  from?: { origin: RetryOrigin; declaredBy?: string; declaredByVersion?: string }
+): void {
+  if (!isRetryable(reason)) return
+  const before = retryQueue.entries.length
+  retryQueue = enqueue(retryQueue, {
+    package: name, seq, reason, now: Date.now(),
+    origin: from?.origin ?? 'feed',
+    declaredBy: from?.declaredBy,
+    declaredByVersion: from?.declaredByVersion,
+  })
+  if (retryQueue.entries.length > before) coverage.retryQueued++
+}
+
+// Retries whatever is due, sequentially and outside the feed's own concurrency.
+// A drain that raced the feed would double the request rate exactly when the
+// registry is already refusing to answer.
+async function drainRetries(config: WatcherConfig): Promise<void> {
+  const now = Date.now()
+  const ready = due(retryQueue, now)
+  if (ready.length === 0) return
+
+  for (const entry of ready) {
+    let recovered = false
+    try {
+      if (entry.origin === 'dependency') {
+        // Back through the dependency path, never through the score path. The
+        // reason this package is worth having is that something already
+        // captured declares it, and `analyzePackage` would weigh it on its own
+        // profile — which is what rejected `mutex-forge` at score 10.
+        const dep = await fetchPackument(entry.package)
+        await captureDeclaredDependency(config, {
+          package: entry.package,
+          declaredBy: entry.declaredBy ?? 'unknown',
+          declaredByVersion: entry.declaredByVersion ?? 'unknown',
+        }, dep)
+        recovered = true
+      } else {
+        const analysis = await analyzePackage(entry.package, config, new Date().toISOString())
+        recovered = analysis.outcome === 'analyzed'
+        if (recovered) coverage.analyzed++
+      }
+      if (recovered) {
+        coverage.retryRecovered++
+        console.log(
+          `RECOVERED ${entry.package} (${entry.origin}) on attempt ${entry.attempts + 1} ` +
+          `(${entry.reason}, ${Math.round((now - new Date(entry.firstSeenAt).getTime()) / 1000)}s ago)` +
+          (entry.declaredBy ? ` <- declared by ${entry.declaredBy}` : '')
+        )
+      }
+    } catch {
+      recovered = false
+    }
+
+    const outcome = recordAttempt(retryQueue, entry.package, recovered, Date.now())
+    retryQueue = outcome.state
+    if (outcome.exhausted) {
+      coverage.retryExhausted++
+      recordPermanentLoss(config.outputDir, entry, Date.now())
+    }
+  }
+
+  saveQueue(config.outputDir, retryQueue)
+}
+
+// ---------------------------------------------------------------------------
+// Dependencies of what was captured
+// ---------------------------------------------------------------------------
+
+// Depth one, deliberately. A captured dependency does not follow its own
+// dependencies: the argument for capturing it is that something already judged
+// interesting pointed at it, and that argument does not survive a second hop —
+// at depth two it would reach whatever the payload happens to require.
+async function followDependencies(
+  config: WatcherConfig,
+  packageName: string,
+  version: string,
+  meta: VersionMeta
+): Promise<void> {
+  const truncated = truncatedFollow(meta)
+  if (truncated > 0) {
+    coverage.dependencyFollowTruncated += truncated
+    console.log(
+      `dependency follow truncated for ${packageName}@${version}: ` +
+      `${truncated} beyond the cap of ${MAX_FOLLOWED_PER_CAPTURE} not followed`
+    )
+  }
+
+  // Recorded before the followable ones, because these cannot be followed at
+  // all: npm never hosted them, so there is nothing to ask npm for. Eight
+  // packages from one operator in this corpus carry one.
+  for (const off of offRegistryDependencies(meta)) {
+    coverage.offRegistryDependencies++
+    console.log(
+      `OFF-REGISTRY DEPENDENCY  ${packageName}@${version} declares ${off.name} -> ${off.specifier}` +
+      `${off.host ? ` (host ${off.host})` : ''}. npm install fetches and runs this; the registry ` +
+      `never saw it and cannot take it down.`
+    )
+  }
+
+  for (const candidate of declaredDependencies(packageName, version, meta)) {
+    coverage.dependenciesFollowed++
+    let dep: Packument
+    try {
+      dep = await fetchPackument(candidate.package)
+    } catch (e) {
+      // Queued, not dropped. The first version of this path let a failed fetch
+      // end the matter, which is D15 in a new place: if `mutex-forge` had 404ed
+      // we would have lost the one package the five decoys all pointed at, for
+      // the same reason we lost 6,892 publications.
+      queueForRetry(config, candidate.package, 0, classifyFetchFailure(e), {
+        origin: 'dependency',
+        declaredBy: candidate.declaredBy,
+        declaredByVersion: candidate.declaredByVersion,
+      })
+      continue
+    }
+
+    await captureDeclaredDependency(config, candidate, dep)
+  }
+}
+
+// One dependency, already fetched. Split out so the retry drain can reach it:
+// an entry queued as `dependency` has to come back through THIS path and not
+// through the score path, which would reject it for the reasons the rule exists
+// to overrule.
+async function captureDeclaredDependency(
+  config: WatcherConfig,
+  candidate: DependencyCandidate,
+  dep: Packument
+): Promise<void> {
+  const decision = shouldCaptureDependency(dep)
+  if (!decision.capture) return
+
+  const latest = dep.distTags['latest']
+  const depMeta = latest ? dep.versions[latest] : undefined
+  if (!latest || !depMeta) return
+
+  // Two reasons to keep the packument and decline the bytes, both leaving the
+  // package in every denominator.
+  //
+  // The 8MB cap the score path applies, for the same reason it applies there —
+  // the rule deliberately ignores a dependency's SIZE when deciding whether it
+  // is interesting, and that is a different question from whether its tarball is
+  // worth the disk. `mutex-forge` is 664KB and unaffected.
+  const unpackedCap = config.maxCaptureUnpackedBytes ?? DEFAULT_MAX_CAPTURE_BYTES
+  const overCap = depMeta.unpackedSize > unpackedCap
+
+  // And the same-scope sibling: 203 of the first 219 captures on this path were
+  // a package declaring another under its own scope, which is a monorepo
+  // release. Degraded rather than excluded — see sameScope() for why the
+  // denominator matters more than the disk here.
+  const sibling = !overCap && sameScope(candidate.declaredBy, candidate.package)
+  const refuseTarball = overCap || sibling
+
+  const now = Date.now()
+  const safeName = candidate.package.replace(/[@/]/g, '_')
+  const dir = join(config.outputDir, 'captures', `${safeName}@${latest}_${now}`)
+  console.log(
+    `DEPENDENCY${overCap ? ' (PACKUMENT ONLY, over cap)' : sibling ? ' (PACKUMENT ONLY, same scope)' : ''} ${candidate.package}@${latest} ` +
+    `<- declared by ${candidate.declaredBy}@${candidate.declaredByVersion} ` +
+    `(${decision.ageDays?.toFixed(2)} days old)`
+  )
+  if (overCap) coverage.tarballRefusedForSize++
+  if (sibling) coverage.dependencySameScope++
+  try {
+    await createNgpack(candidate.package, dir, {
+      versions: refuseTarball ? [] : [latest],
+      objectStore: join(config.outputDir, 'captures'),
+    })
+    writeCaptureMetadata(dir, {
+      package: candidate.package,
+      version: latest,
+      capturedAt: new Date(now).toISOString(),
+      score: 0,
+      label: 'unconfirmed',
+      // Its own name, so this population can be counted apart from both the
+      // score path and quarantine. A capture whose reason is a declaration by
+      // another package is a different draw and must not silently join either
+      // denominator.
+      captureReason: 'declared-dependency',
+      tarballRefused: overCap
+        ? { reason: 'over-capture-cap' as const, unpackedSize: depMeta.unpackedSize, capBytes: unpackedCap }
+        : sibling
+          ? { reason: 'same-scope-sibling' as const, unpackedSize: depMeta.unpackedSize, declaredBy: candidate.declaredBy }
+          : undefined,
+      engineVersion: engineVersion(),
+      notes:
+        `captured because ${candidate.declaredBy}@${candidate.declaredByVersion} declares it and it is ` +
+        `${decision.ageDays?.toFixed(2)} days old. ${decision.reason}. Its own size, repository and ` +
+        `score were not consulted — that is the point of this path.`,
+    })
+    coverage.dependenciesCaptured++
+    budget?.recordCapture(directorySize(dir))
+  } catch (e) {
+    console.error(`  -> dependency capture failed: ${e}`)
+  }
+}
+
 function reportCoverage(): void {
+  if (coverage.retryQueued > 0 || coverage.dependenciesCaptured > 0) {
+    console.log(
+      `[segunda oportunidad] cola 404: ${retryQueue.entries.length} pendientes · ` +
+      `${coverage.retryRecovered} recuperadas · ${coverage.retryExhausted} perdidas definitivamente` +
+      (retryQueue.dropped > 0 ? ` · ${retryQueue.dropped} descartadas por cola llena` : '') +
+      ` | dependencias: ${coverage.dependenciesFollowed} seguidas · ` +
+      `${coverage.dependenciesCaptured} capturadas` +
+      (coverage.dependencySameScope > 0 ? ` · ${coverage.dependencySameScope} hermanas de scope (solo packument)` : '') +
+      (coverage.offRegistryDependencies > 0 ? ` · ${coverage.offRegistryDependencies} FUERA DEL REGISTRO (no seguibles)` : '') +
+      (coverage.dependencyFollowTruncated > 0 ? ` · ${coverage.dependencyFollowTruncated} sin seguir por el tope` : '')
+    )
+  }
   const unreachable = Object.entries(coverage.unreachableByReason)
     .sort(([, a], [, b]) => b - a)
     .map(([reason, n]) => `${reason}:${n}`)

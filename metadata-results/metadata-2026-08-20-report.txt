@@ -1,0 +1,264 @@
+METADATA, CONTROLLED  norte-guard v1.4.0
+  window 2026-08-13T05:17 to 2026-08-20T16:59
+
+WHAT THIS RUN IS FOR
+  Every endpoint in the capability run needs the tarball, and 0 of the 42
+  confirmed removals collected outside this project still has one. These
+  endpoints need only the packument, which npm keeps after the takedown —
+  including the publication timestamps of versions it has already deleted.
+
+  Most of what a packument says about a young package is downstream of the
+  package being young, so every row below carries how it stands to the three
+  conjuncts the capture filter selects on. A separation on an `entailed` row
+  is the filter measuring itself and is labelled as such, not read as a find.
+
+THE COHORT
+  24307 captures scanned, 21034 packuments read
+  cases        87   of which 31 have NO tarball and are analysable here anyway
+  controls    409   size-matched, every capture reason
+
+WHAT THIS RUN FOUND
+  At the publisher unit — 10 cases against 193 controls —
+  NOT ONE uncontaminated endpoint separates. Every interval includes zero.
+
+  These separate at the CAPTURE unit and not at the publisher unit:
+    publishes faster than once an hour (median gap)
+    two publications less than five minutes apart
+  A capture-unit rate over this cohort is a rate of REPUBLISHING. One case
+  operator holds 149 releases of one name, and every endpoint here is a
+  property of a release habit, so counting it once per capture gives that
+  operator as many votes as it made releases. Read the publisher rows.
+
+==========================================================================
+THE ENDPOINTS   11 comparisons, intervals widened to z=2.84
+
+  AT THE PUBLISHER UNIT   10 cases, 193 controls   <- the primary unit, declared before the run
+
+  ---- INDEPENDENT of the capture decision -----------------------------------
+  publishes faster than once an hour (median gap)
+    cases 4/5  80.0%    controls 26/103  25.2%    held out 5/90 (record cannot answer)
+    INCONCLUSIVE at this n. +54.8pp, family-adjusted -1.9pp to +75.3pp, over 5 cases and 103 controls.
+
+  two publications less than five minutes apart
+    cases 2/5  40.0%    controls 19/103  18.4%    held out 5/90 (record cannot answer)
+    INCONCLUSIVE at this n. +21.6pp, family-adjusted -13.7pp to +67.5pp, over 5 cases and 103 controls.
+
+  publisher is NOT a declared maintainer
+    cases 0/10   0.0%    controls 1/193   0.5%
+    INCONCLUSIVE at this n. -0.5pp, family-adjusted -4.9pp to +44.1pp, over 10 cases and 193 controls.
+
+  more than one maintainer listed
+    cases 0/10   0.0%    controls 23/193  11.9%
+    INCONCLUSIVE at this n. -11.9pp, family-adjusted -20.1pp to +33.0pp, over 10 cases and 193 controls.
+
+  added a dependency against the previous version
+    cases 1/5  20.0%    controls 2/96   2.1%    held out 5/97 (record cannot answer)
+    INCONCLUSIVE at this n. +17.9pp, family-adjusted -2.2pp to +72.9pp, over 5 cases and 96 controls.
+
+  ---- PARTIAL of the capture decision ---------------------------------------
+  more than ten authored releases
+    cases 1/10  10.0%    controls 35/193  18.1%
+    INCONCLUSIVE at this n. -8.1pp, family-adjusted -20.9pp to +37.0pp, over 10 cases and 193 controls.
+    why: young caps it in practice. Reported because the cap is loose: 149 releases in five days is not something the conjunct forces.
+
+  more than five releases a day
+    cases 5/5 100.0%    controls 25/103  24.3%    held out 5/90 (record cannot answer)
+    SEPARATES, PARTLY CONSTRAINED. +75.7pp (family-adjusted +12.6pp to +85.6pp). The class bounds this endpoint without fixing it, so some of the difference is the filter.
+    why: young bounds the span this can be measured over — a seven-day-old package cannot show a slow year — so the denominator is squeezed on the case side by the filter.
+
+  declared version claims more history than it has
+    cases 1/9  11.1%    controls 4/67   6.0%    held out 1/126 (record cannot answer)
+    INCONCLUSIVE at this n. +5.1pp, family-adjusted -11.9pp to +52.1pp, over 9 cases and 67 controls.
+    why: young makes a low release count likely, so half of this ratio is downstream of the filter. The declared version is not.
+
+  ---- ENTAILED of the capture decision --------------------------------------
+  name under seven days old (the young conjunct itself)
+    cases 10/10 100.0%    controls 136/193  70.5%
+    INCONCLUSIVE at this n. +29.5pp, family-adjusted -15.8pp to +39.5pp, over 10 cases and 193 controls.
+    why: It IS the young conjunct, measured continuously. Against a class-matched control both arms are under seven days by construction. Present to make the entailment visible in the output rather than to test anything.
+
+  has npm provenance
+    cases 0/10   0.0%    controls 42/193  21.8%
+    INCONCLUSIVE at this n. -21.8pp, family-adjusted -31.2pp to +23.4pp, over 10 cases and 193 controls.
+    why: Trusted publishing needs a GitHub repository and a workflow, and !hasRepository is a conjunct. Measured at full size in D11: 0/10 cases against 0/950 class-matched controls, exactly 0.0pp, against −44.7pp on the raw pool.
+
+  lost provenance it previously had
+    cases 0/10   0.0%    controls 3/193   1.6%
+    INCONCLUSIVE at this n. -1.6pp, family-adjusted -6.6pp to +43.1pp, over 10 cases and 193 controls.
+    why: Requires a signed predecessor, which requires the repository the conjunct excludes. Cannot fire on either arm of a class-matched comparison, and a 0-versus-0 is not a result.
+
+
+  AT THE CAPTURE UNIT   87 cases, 409 controls
+
+  ---- INDEPENDENT of the capture decision -----------------------------------
+  publishes faster than once an hour (median gap)
+    cases 64/67  95.5%    controls 87/274  31.8%    held out 20/135 (record cannot answer)
+    SEPARATES. +63.8pp (family-adjusted +48.1pp to +71.9pp, excludes zero), on an endpoint nothing in the capture decision constrains.
+
+  two publications less than five minutes apart
+    cases 59/67  88.1%    controls 40/274  14.6%    held out 20/135 (record cannot answer)
+    SEPARATES. +73.5pp (family-adjusted +56.5pp to +82.3pp, excludes zero), on an endpoint nothing in the capture decision constrains.
+
+  publisher is NOT a declared maintainer
+    cases 0/87   0.0%    controls 1/409   0.2%
+    INCONCLUSIVE at this n. -0.2pp, family-adjusted -2.4pp to +8.2pp, over 87 cases and 409 controls.
+
+  more than one maintainer listed
+    cases 0/87   0.0%    controls 28/409   6.8%
+    INCONCLUSIVE at this n. -6.8pp, family-adjusted -11.3pp to +2.1pp, over 87 cases and 409 controls.
+
+  added a dependency against the previous version
+    cases 6/64   9.4%    controls 5/263   1.9%    held out 23/146 (record cannot answer)
+    INCONCLUSIVE at this n. +7.5pp, family-adjusted -0.0pp to +22.8pp, over 64 cases and 263 controls.
+
+  ---- PARTIAL of the capture decision ---------------------------------------
+  more than ten authored releases
+    cases 56/87  64.4%    controls 117/409  28.6%
+    SEPARATES, PARTLY CONSTRAINED. +35.8pp (family-adjusted +19.1pp to +49.8pp). The class bounds this endpoint without fixing it, so some of the difference is the filter.
+
+  more than five releases a day
+    cases 66/67  98.5%    controls 89/274  32.5%    held out 20/135 (record cannot answer)
+    SEPARATES, PARTLY CONSTRAINED. +66.0pp (family-adjusted +51.6pp to +73.6pp). The class bounds this endpoint without fixing it, so some of the difference is the filter.
+
+  declared version claims more history than it has
+    cases 10/84  11.9%    controls 4/140   2.9%    held out 3/269 (record cannot answer)
+    INCONCLUSIVE at this n. +9.0pp, family-adjusted -0.9pp to +22.7pp, over 84 cases and 140 controls.
+
+  ---- ENTAILED of the capture decision --------------------------------------
+  name under seven days old (the young conjunct itself)
+    cases 87/87 100.0%    controls 285/409  69.7%
+    SEPARATES, AND IT IS AN ARTIFACT. name under seven days old (the young conjunct itself) is an input to the capture decision, so this +30.3pp describes the filter and not the packages. Not a finding.
+
+  has npm provenance
+    cases 0/87   0.0%    controls 106/409  25.9%
+    SEPARATES, AND IT IS AN ARTIFACT. has npm provenance is an input to the capture decision, so this -25.9pp describes the filter and not the packages. Not a finding.
+
+  lost provenance it previously had
+    cases 0/87   0.0%    controls 3/409   0.7%
+    INCONCLUSIVE at this n. -0.7pp, family-adjusted -3.2pp to +7.8pp, over 87 cases and 409 controls.
+
+
+  AT THE PACKAGE UNIT   26 cases, 260 controls
+
+  ---- INDEPENDENT of the capture decision -----------------------------------
+  publishes faster than once an hour (median gap)
+    cases 5/7  71.4%    controls 27/125  21.6%    held out 19/135 (record cannot answer)
+    SEPARATES. +49.8pp (family-adjusted +1.9pp to +74.8pp, excludes zero), on an endpoint nothing in the capture decision constrains.
+
+  two publications less than five minutes apart
+    cases 3/7  42.9%    controls 19/125  15.2%    held out 19/135 (record cannot answer)
+    INCONCLUSIVE at this n. +27.7pp, family-adjusted -6.8pp to +68.5pp, over 7 cases and 125 controls.
+
+  publisher is NOT a declared maintainer
+    cases 0/26   0.0%    controls 1/260   0.4%
+    INCONCLUSIVE at this n. -0.4pp, family-adjusted -3.7pp to +23.3pp, over 26 cases and 260 controls.
+
+  more than one maintainer listed
+    cases 0/26   0.0%    controls 22/260   8.5%
+    INCONCLUSIVE at this n. -8.5pp, family-adjusted -14.7pp to +15.5pp, over 26 cases and 260 controls.
+
+  added a dependency against the previous version
+    cases 1/7  14.3%    controls 1/115   0.9%    held out 19/145 (record cannot answer)
+    INCONCLUSIVE at this n. +13.4pp, family-adjusted -1.3pp to +64.5pp, over 7 cases and 115 controls.
+
+  ---- PARTIAL of the capture decision ---------------------------------------
+  more than ten authored releases
+    cases 1/26   3.8%    controls 48/260  18.5%
+    INCONCLUSIVE at this n. -14.6pp, family-adjusted -23.1pp to +11.3pp, over 26 cases and 260 controls.
+
+  more than five releases a day
+    cases 6/7  85.7%    controls 27/125  21.6%    held out 19/135 (record cannot answer)
+    SEPARATES, PARTLY CONSTRAINED. +64.1pp (family-adjusted +11.7pp to +79.5pp). The class bounds this endpoint without fixing it, so some of the difference is the filter.
+
+  declared version claims more history than it has
+    cases 10/24  41.7%    controls 4/101   4.0%    held out 2/159 (record cannot answer)
+    SEPARATES, PARTLY CONSTRAINED. +37.7pp (family-adjusted +13.0pp to +64.8pp). The class bounds this endpoint without fixing it, so some of the difference is the filter.
+
+  ---- ENTAILED of the capture decision --------------------------------------
+  name under seven days old (the young conjunct itself)
+    cases 26/26 100.0%    controls 186/260  71.5%
+    SEPARATES, AND IT IS AN ARTIFACT. name under seven days old (the young conjunct itself) is an input to the capture decision, so this +28.5pp describes the filter and not the packages. Not a finding.
+
+  has npm provenance
+    cases 0/26   0.0%    controls 47/260  18.1%
+    INCONCLUSIVE at this n. -18.1pp, family-adjusted -25.8pp to +6.3pp, over 26 cases and 260 controls.
+
+  lost provenance it previously had
+    cases 0/26   0.0%    controls 3/260   1.2%
+    INCONCLUSIVE at this n. -1.2pp, family-adjusted -5.0pp to +22.5pp, over 26 cases and 260 controls.
+
+
+==========================================================================
+THE BATCH AS THE UNIT   (idea 4)
+  38956 families, 30299 cadences, 107390 isolated publications
+  A family is several DISTINCT names from one account inside
+  60 minutes. One name republishing is a cadence and is counted apart:
+  @siwatfa/yorn is 149 releases of one package and is not a campaign.
+
+  tight batch (>=3 names within 60min)    22986   59.0% of families
+  every name a first publication            140   0.4%
+  BOTH                                       55   0.1%
+  both, and sharing a lexical token          43   0.1%
+
+  THE BASE RATE IS THE RESULT. Publishing several names at once is what a
+  monorepo release is — 84 @hive-ui packages in two minutes — and the tight-
+  batch endpoint describes 59.0% of the families here. It is the conjunction
+  with all-first-publication that is rare. The naive form of idea 4 is
+  saturated by ordinary practice, exactly the way idea 1 was by minification.
+
+  families holding a confirmed_malicious name:
+    whltd4              5n    8min  tight=Y allNew=Y tok=-
+      napi-raw, eslint-generate-release, check-audit, resolve-audit, cspell-esm
+    javonayers999       5n    4min  tight=Y allNew=Y tok=-
+      async-critical-section, keyed-mutex-map, resource-lease-pool, single-flight-lock, try-lock-runner
+    whltd4              3n    4min  tight=Y allNew=Y tok=-
+      gunzip-js, depcruise-fmt, depcruise-baseline
+    a_soclav            2n    0min  tight=n allNew=Y tok=vim
+      kit-hydration-vim, svelte-goal-vim
+    rihannasmith        2n    1min  tight=n allNew=n tok=texts
+      ai-texts, ai-texts-utils
+    ferrousdev          2n    0min  tight=n allNew=n tok=core
+      bcs-core, sui-gql-core
+    ferrousdev          2n   10min  tight=n allNew=n tok=-
+      leb128x, sui-move-rpc
+    wokorc              2n    3min  tight=n allNew=n tok=-
+      sui-move-graphql, ulebkit
+
+  ONE COUNTER, SEVERAL ACCOUNTS
+  A family is keyed by publisher, and that is a ceiling: a campaign that
+  rotates accounts is invisible to every per-publisher unit. What makes it
+  visible is a counter in the name that ascends across the whole set.
+
+    shape <stem>-N-th   22 names across 3 accounts
+      accounts: node-mini-tools, pkg-utils-lab, tiny-js-helpers
+      numbers:  1, 3, 7, 9, 12, 37, 38, 39, 41, 44, 45, 47, 48, 49, 51, 53, 54, 56, 57, 59, 61, 63
+      17 of 21 adjacent-by-number pairs change account
+      median gap 117s, span 2082min
+
+==========================================================================
+WHAT THE RECORD ITSELF GOT WRONG
+  394 packuments declare a `created` LATER than their own earliest release.
+  npm resets it when it republishes a removed name as 0.0.1-security, so a
+  package that lived five days reads as newborn — and `young` is one of the
+  three conjuncts the quarantine filter selects on. Every age in this run is
+  taken from the release timestamps instead.
+  385 captures carry that defect and are NOT in the class once the age is repaired.
+
+  1 publications were dropped because the account resolves to npm itself.
+  0 captured versions ARE npm's 0.0.1-security placeholder. Attributing those to
+  the registry would have grouped unrelated removals into one fabricated
+  campaign — the OIDC-bot defect in a second costume, in the direction that
+  manufactures a finding rather than the one that hides it.
+
+WHAT THIS CANNOT SAY
+  - The pool is this collector's capture filter, not npm. Every base rate
+    here is a rate within an already-enriched population.
+  - The family results are DESCRIPTIVE. With 4 malicious families there is no
+    case arm to test against a control arm, and none is claimed.
+  - `all first publications` is read at capture time. A name captured at its
+    first release may have published again afterwards, and this run would not
+    know. The error inflates the endpoint on both arms.
+  - The hour of publication is recorded and NOT tested. A UTC hour is the
+    publisher's longitude before it is anything else, and 8 case accounts
+    is one draw from a timezone distribution.
+  - Nothing here scores. No endpoint contributes a point to any verdict.
