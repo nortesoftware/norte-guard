@@ -1,0 +1,269 @@
+{
+  "npm@10.9.8": [
+    {
+      "id": "p0-unconfined",
+      "description": "No confinement. Control arm.",
+      "props": []
+    },
+    {
+      "id": "p1-tmpfs-naive",
+      "description": "ProtectHome=tmpfs and nothing else.",
+      "props": [
+        "ProtectHome=tmpfs"
+      ],
+      "confound": "Node lives under $HOME/.local here, so this fails before the manager runs."
+    },
+    {
+      "id": "p2-tmpfs-toolchain",
+      "description": "tmpfs with the Node toolchain bound back read-only.",
+      "props": [
+        "ProtectHome=tmpfs",
+        "BindReadOnlyPaths=-/home/chris/.local"
+      ]
+    },
+    {
+      "id": "p3-tmpfs-toolchain-cache",
+      "description": "As p2 plus this manager's own $HOME state, writable. ~/.npmrc stays denied.",
+      "props": [
+        "ProtectHome=tmpfs",
+        "BindReadOnlyPaths=-/home/chris/.local",
+        "BindPaths=-/home/chris/.npm"
+      ]
+    },
+    {
+      "id": "p4-tmpfs-plus-npmrc",
+      "description": "As p3 plus ~/.npmrc read-only. Paired with p3 this isolates ~/.npmrc.",
+      "props": [
+        "ProtectHome=tmpfs",
+        "BindReadOnlyPaths=-/home/chris/.local",
+        "BindPaths=-/home/chris/.npm",
+        "BindReadOnlyPaths=-/home/chris/.npmrc"
+      ]
+    },
+    {
+      "id": "p5-credentials-only",
+      "description": "Surgical: $HOME visible, only the credential set denied.",
+      "props": [
+        "InaccessiblePaths=-/home/chris/.ssh",
+        "InaccessiblePaths=-/home/chris/.gnupg",
+        "InaccessiblePaths=-/home/chris/.mozilla",
+        "InaccessiblePaths=-/home/chris/.aws",
+        "InaccessiblePaths=-/home/chris/.config"
+      ]
+    },
+    {
+      "id": "p6-p3-plus-gyp-cache",
+      "description": "As p3 plus a writable ~/.cache/node-gyp — what a source build additionally needs.",
+      "props": [
+        "ProtectHome=tmpfs",
+        "BindReadOnlyPaths=-/home/chris/.local",
+        "BindPaths=-/home/chris/.npm",
+        "BindPaths=-/home/chris/.cache/node-gyp"
+      ]
+    }
+  ],
+  "pnpm@11.22.0": [
+    {
+      "id": "p0-unconfined",
+      "description": "No confinement. Control arm.",
+      "props": []
+    },
+    {
+      "id": "p1-tmpfs-naive",
+      "description": "ProtectHome=tmpfs and nothing else.",
+      "props": [
+        "ProtectHome=tmpfs"
+      ],
+      "confound": "Node lives under $HOME/.local here, so this fails before the manager runs."
+    },
+    {
+      "id": "p2-tmpfs-toolchain",
+      "description": "tmpfs with the Node toolchain bound back read-only.",
+      "props": [
+        "ProtectHome=tmpfs",
+        "BindReadOnlyPaths=-/home/chris/.local"
+      ]
+    },
+    {
+      "id": "p3-tmpfs-toolchain-cache",
+      "description": "As p2 plus this manager's own $HOME state, writable. ~/.npmrc stays denied.",
+      "props": [
+        "ProtectHome=tmpfs",
+        "BindReadOnlyPaths=-/home/chris/.local",
+        "BindPaths=-/home/chris/.cache/pnpm",
+        "BindPaths=-/home/chris/.local/state",
+        "BindPaths=-/home/chris/.local/share",
+        "BindPaths=-/home/chris/.config/pnpm"
+      ]
+    },
+    {
+      "id": "p4-tmpfs-plus-npmrc",
+      "description": "As p3 plus ~/.npmrc read-only. Paired with p3 this isolates ~/.npmrc.",
+      "props": [
+        "ProtectHome=tmpfs",
+        "BindReadOnlyPaths=-/home/chris/.local",
+        "BindPaths=-/home/chris/.cache/pnpm",
+        "BindPaths=-/home/chris/.local/state",
+        "BindPaths=-/home/chris/.local/share",
+        "BindPaths=-/home/chris/.config/pnpm",
+        "BindReadOnlyPaths=-/home/chris/.npmrc"
+      ]
+    },
+    {
+      "id": "p5-credentials-only",
+      "description": "Surgical: $HOME visible, only the credential set denied.",
+      "props": [
+        "InaccessiblePaths=-/home/chris/.ssh",
+        "InaccessiblePaths=-/home/chris/.gnupg",
+        "InaccessiblePaths=-/home/chris/.mozilla",
+        "InaccessiblePaths=-/home/chris/.aws",
+        "InaccessiblePaths=-/home/chris/.config"
+      ]
+    },
+    {
+      "id": "p6-p3-plus-gyp-cache",
+      "description": "As p3 plus a writable ~/.cache/node-gyp — what a source build additionally needs.",
+      "props": [
+        "ProtectHome=tmpfs",
+        "BindReadOnlyPaths=-/home/chris/.local",
+        "BindPaths=-/home/chris/.cache/pnpm",
+        "BindPaths=-/home/chris/.local/state",
+        "BindPaths=-/home/chris/.local/share",
+        "BindPaths=-/home/chris/.config/pnpm",
+        "BindPaths=-/home/chris/.cache/node-gyp"
+      ]
+    }
+  ],
+  "yarn@1.22.22": [
+    {
+      "id": "p0-unconfined",
+      "description": "No confinement. Control arm.",
+      "props": []
+    },
+    {
+      "id": "p1-tmpfs-naive",
+      "description": "ProtectHome=tmpfs and nothing else.",
+      "props": [
+        "ProtectHome=tmpfs"
+      ],
+      "confound": "Node lives under $HOME/.local here, so this fails before the manager runs."
+    },
+    {
+      "id": "p2-tmpfs-toolchain",
+      "description": "tmpfs with the Node toolchain bound back read-only.",
+      "props": [
+        "ProtectHome=tmpfs",
+        "BindReadOnlyPaths=-/home/chris/.local"
+      ]
+    },
+    {
+      "id": "p3-tmpfs-toolchain-cache",
+      "description": "As p2 plus this manager's own $HOME state, writable. ~/.npmrc stays denied.",
+      "props": [
+        "ProtectHome=tmpfs",
+        "BindReadOnlyPaths=-/home/chris/.local",
+        "BindPaths=-/home/chris/.cache/yarn",
+        "BindPaths=-/home/chris/.config/yarn",
+        "BindPaths=-/home/chris/.yarn"
+      ]
+    },
+    {
+      "id": "p4-tmpfs-plus-npmrc",
+      "description": "As p3 plus ~/.npmrc read-only. Paired with p3 this isolates ~/.npmrc.",
+      "props": [
+        "ProtectHome=tmpfs",
+        "BindReadOnlyPaths=-/home/chris/.local",
+        "BindPaths=-/home/chris/.cache/yarn",
+        "BindPaths=-/home/chris/.config/yarn",
+        "BindPaths=-/home/chris/.yarn",
+        "BindReadOnlyPaths=-/home/chris/.npmrc"
+      ]
+    },
+    {
+      "id": "p5-credentials-only",
+      "description": "Surgical: $HOME visible, only the credential set denied.",
+      "props": [
+        "InaccessiblePaths=-/home/chris/.ssh",
+        "InaccessiblePaths=-/home/chris/.gnupg",
+        "InaccessiblePaths=-/home/chris/.mozilla",
+        "InaccessiblePaths=-/home/chris/.aws",
+        "InaccessiblePaths=-/home/chris/.config"
+      ]
+    },
+    {
+      "id": "p6-p3-plus-gyp-cache",
+      "description": "As p3 plus a writable ~/.cache/node-gyp — what a source build additionally needs.",
+      "props": [
+        "ProtectHome=tmpfs",
+        "BindReadOnlyPaths=-/home/chris/.local",
+        "BindPaths=-/home/chris/.cache/yarn",
+        "BindPaths=-/home/chris/.config/yarn",
+        "BindPaths=-/home/chris/.yarn",
+        "BindPaths=-/home/chris/.cache/node-gyp"
+      ]
+    }
+  ],
+  "bun@1.4.0": [
+    {
+      "id": "p0-unconfined",
+      "description": "No confinement. Control arm.",
+      "props": []
+    },
+    {
+      "id": "p1-tmpfs-naive",
+      "description": "ProtectHome=tmpfs and nothing else.",
+      "props": [
+        "ProtectHome=tmpfs"
+      ],
+      "confound": "Node lives under $HOME/.local here, so this fails before the manager runs."
+    },
+    {
+      "id": "p2-tmpfs-toolchain",
+      "description": "tmpfs with the Node toolchain bound back read-only.",
+      "props": [
+        "ProtectHome=tmpfs",
+        "BindReadOnlyPaths=-/home/chris/.local"
+      ]
+    },
+    {
+      "id": "p3-tmpfs-toolchain-cache",
+      "description": "As p2 plus this manager's own $HOME state, writable. ~/.npmrc stays denied.",
+      "props": [
+        "ProtectHome=tmpfs",
+        "BindReadOnlyPaths=-/home/chris/.local",
+        "BindPaths=-/home/chris/.bun"
+      ]
+    },
+    {
+      "id": "p4-tmpfs-plus-npmrc",
+      "description": "As p3 plus ~/.npmrc read-only. Paired with p3 this isolates ~/.npmrc.",
+      "props": [
+        "ProtectHome=tmpfs",
+        "BindReadOnlyPaths=-/home/chris/.local",
+        "BindPaths=-/home/chris/.bun",
+        "BindReadOnlyPaths=-/home/chris/.npmrc"
+      ]
+    },
+    {
+      "id": "p5-credentials-only",
+      "description": "Surgical: $HOME visible, only the credential set denied.",
+      "props": [
+        "InaccessiblePaths=-/home/chris/.ssh",
+        "InaccessiblePaths=-/home/chris/.gnupg",
+        "InaccessiblePaths=-/home/chris/.mozilla",
+        "InaccessiblePaths=-/home/chris/.aws",
+        "InaccessiblePaths=-/home/chris/.config"
+      ]
+    },
+    {
+      "id": "p6-p3-plus-gyp-cache",
+      "description": "As p3 plus a writable ~/.cache/node-gyp — what a source build additionally needs.",
+      "props": [
+        "ProtectHome=tmpfs",
+        "BindReadOnlyPaths=-/home/chris/.local",
+        "BindPaths=-/home/chris/.bun",
+        "BindPaths=-/home/chris/.cache/node-gyp"
+      ]
+    }
+  ]
+}

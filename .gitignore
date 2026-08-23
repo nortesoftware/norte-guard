@@ -16,3 +16,4 @@ ttr-log.ndjson
 changes-log.ndjson
 deletions.ndjson
 fp-bench-results/*.tmp
+.claude/

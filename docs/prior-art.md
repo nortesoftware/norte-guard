@@ -221,3 +221,292 @@ Short, and worth being short.
 - [Phylum — NPM Security Holding](https://docs.phylum.io/analytics/npm_security_holding)
 - [OSV — MAL-2026-14056](https://api.osv.dev/v1/vulns/MAL-2026-14056)
 - [GHSA-2hqf-5jxh-4wp2](https://github.com/advisories/GHSA-2hqf-5jxh-4wp2)
+
+---
+---
+
+# Part II — Prevention at install time
+
+Written on 2026-08-21, **before** building anything. That is the rule from Part I,
+applied for the first time in the right order.
+
+## The question
+
+Part I asked "is this package malicious?" and got `INSUFFICIENT_HISTORY` on 100% of
+n=1,505. The proposed change of direction asks about the action instead, in three gates:
+
+| gate | question |
+|---|---|
+| **entrada** | what does `npm install` bring in that was not authorized? off-registry code, install scripts, unpinned resolution, unnamed transitives |
+| **lectura** | what secrets can the install process open? `~/.npmrc`, `~/.aws/credentials`, `~/.ssh`, `~/.config/gh`, `GITHUB_TOKEN` |
+| **salida** | where does the data leave? every theft ends in a socket |
+
+The thesis was that **lectura** is the gate the attacker cannot route around, that it
+should be *enforced* rather than detected, and that Linux Landlock (unprivileged since
+5.13) is the mechanism.
+
+## The answer
+
+**The thesis is correct and the idea is already built.** Not once — at least eight
+times, by eight independent groups, all shipping, most released within the last week.
+
+| gate | verdict |
+|---|---|
+| **entrada** | **exists** — and it was absorbed by the package managers themselves in 2026 |
+| **lectura** | **exists** — Landlock, unprivileged, deny-by-default, applied to the install process tree, covering this exact file list |
+| **salida** | **partial** — nobody has solved per-host egress on Linux; Landlock structurally cannot |
+
+Method: ten parallel search lanes, then adversarial verification of every serious
+candidate against primary sources — repository source files, kernel docs, RFC text,
+release APIs — not vendor blogs. Then a completeness critic that found three things the
+ten lanes missed, one of which changed the verdict. Roughly 1,000 tool calls. Where a
+claim below was settled by running something rather than reading something, it says so.
+
+---
+
+## entrada — **exists** (and is now the package manager's job)
+
+This gate closed while the detection work in Part I was being done.
+
+**npm v12.0.0, released 2026-07-08** (RFC 0054, PR #868, merged 2026-06-08) ships three
+defaults that between them cover most of the entrada gate:
+
+- `allowScripts` off — dependency lifecycle scripts do not run unless approved
+- `--allow-git=none` — git dependencies refused
+- `--allow-remote=none` — HTTPS-tarball dependencies refused, **direct and transitive**
+
+A verification agent installed npm 12.0.2 and reproduced the PhantomRaven / `gunzip-js`
+pattern from Part I against it. npm refused with `EALLOWREMOTE` before any network
+request, for the direct case, the transitive case, and both http and https hosts — and
+refused the poisoned lockfile that npm 10 installed without complaint. **The exact
+mechanism this project captured eight tarballs of is now a default-off feature of the
+package manager.**
+
+The others moved the same way: **pnpm 11.0** (2026-04-28) defaults `minimumReleaseAge`
+to 1440 minutes and `blockExoticSubdeps` to true; **Yarn 4.14** flipped `enableScripts`
+to false and 4.15 added a 1-day `npmMinimalAgeGate`; **Bun** never ran arbitrary
+dependency scripts.
+
+`lockfile-lint` (5.0.1, 2026-08-13, 335k weekly downloads) covers a slice of this
+statically. Its six validators inspect the `resolved` URL string and nothing else.
+Tested rather than reasoned about: it **would** have caught the PhantomRaven tarball
+dependency, including transitively — npm records it in `package-lock.json` v3 with a
+`resolved` URL and integrity. What defeats it is timing, not visibility: the install
+that writes the lockfile is the same install that runs the payload, so on a laptop it is
+a post-mortem. Three further holes, all confirmed empirically: it is blind to
+membership (a lockfile entry `package.json` never named passes with "No issues
+detected", and its author's source carries the unimplemented `@TODO` for exactly that);
+an entry with no `integrity` field passes `--validate-integrity` silently; and every
+validator fails open when `resolved` is not URL-parseable.
+
+**Consequence for this project: do not build the entrada gate.** It is redundant with
+npm's shipped defaults on every platform, for free.
+
+## lectura — **exists**, comprehensively
+
+This is the finding that matters. Every one of the following is unprivileged, needs no
+container, applies to the whole install process tree, and enforces rather than detects.
+
+**`nono`** (nolabs-ai/nono, Apache-2.0, Rust, 3,760★, v0.74.0 released 2026-08-19,
+pushed 2026-08-21). Uses the `landlock` crate. Its compiled-in `policy.json` carries a
+`deny_credentials` group marked `"required": true` — a unit test asserts no profile can
+remove it — listing `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.azure`, `~/.config/gcloud`,
+`~/.kube`, `~/.docker`, `~/.git-credentials`, `~/.netrc`, **`~/.npmrc`**, `~/.vault-token`
+and twelve more, plus required groups for Linux browser profiles, keyrings, shell
+configs and shell history. Its docs say the pitch verbatim: *"when you run npm install
+inside a nono sandbox, every postinstall script inherits the same restrictions. A
+malicious package cannot read your SSH keys or exfiltrate data — even if its postinstall
+script tries to."* There is a `node-dev` profile, a `node_runtime` group, and a
+`tool-sandbox-examples/npm/` demo.
+
+**`cplt`** (navikt/cplt — Norwegian Labour and Welfare Administration IT, MIT, Rust,
+release 2026-08-17). Landlock + seccomp-BPF, optional bubblewrap layer. `$HOME` appears
+in no allow rule, so the credential paths are denied by *absence* from the allowlist,
+which is stronger than a denylist. Its Linux integration tests plant real secret files
+in a fake `$HOME` and assert the read fails — `landlock_blocks_aws_read`,
+`landlock_blocks_ssh_read`, `landlock_blocks_kube_read`. It injects
+`npm_config_ignore_scripts=true` by default, documents `cplt exec -- npm install` and
+`alias npm="cplt exec -- npm"` in its Quick Start, and its `SECURITY.md` contains a
+Shai-Hulud kill-chain table with a per-step verdict column.
+
+**`mise`** (jdx/mise, 32.8k★). Sandbox landed 2026-04-02 (PR #8845), graduated from
+experimental 2026-06-13, and PR #10940 (2026-07-11) added persistent `[settings.sandbox]`
+deny defaults that apply with no flags — and `src/shims.rs` routes shimmed binaries
+through the same code path, so **in shims mode a literally-typed `npm install` is
+Landlock-confined.** `ABI::V5` best-effort, `$HOME` in no allowlist, and it fails
+*closed*: if Landlock cannot be applied the command errors rather than running
+unconfined. Its own docs carry an `npm install` recipe.
+
+**Homebrew 6.0.18** (released 2026-08-17) — found by the completeness critic, missed by
+all ten lanes. `Library/Homebrew/extend/os/linux/sandbox/landlock.rb`, first committed
+2026-07-21, replaced bubblewrap on 2026-08-04. `formula_installer.rb` calls
+`sandbox.deny_read_home` around the build step and again around post-install, **by
+default**, plus `deny_all_network unless formula.network_access_allowed?(:build)` — a
+capability manifest with kernel enforcement, shipping in a mainstream package manager.
+And `brew sandbox-exec . -- npm install` is a shipped, generic, user-facing one-liner
+that already implements this project's lectura gate.
+
+**`systemd-run --user -p ProtectHome=tmpfs`** — no install, no root, no Landlock, works
+on every systemd distro since ~2015. Verified live on this machine (Debian 13,
+systemd 257): `npm install` completed `exit 0` while `cat ~/.aws/credentials`,
+`ls ~/.ssh` and `cat ~/.npmrc` all returned *No such file or directory*. Two gotchas
+found in the same run: `-p IPAddressDeny=any` silently does nothing in a user unit, and
+`ProtectHome=tmpfs` hides a `$HOME`-installed Node toolchain until it is bound back.
+**This is the five-second answer, and it means the pitch can never be "there was no way
+to do this."**
+
+Also verified as doing the mechanism: **`safedep/pmg`** (Landlock + seccomp-notify,
+transparent `pmg npm install` wrapper, cooldown on by default) — though its sandbox is
+off by default and its `npm-restrictive.yml` ships `allow_read: [/, ...]`, making it
+broad-allow-minus-a-14-entry-denylist rather than deny-by-default, and its `handleOpen`
+fails *open* when it cannot read the target's memory. **`Sandlock`** (arXiv 2605.26298,
+ASPLOS Agentic-OS workshop, May 2026, Apache-2.0, 354★) — unprivileged Landlock+seccomp,
+default-deny home, credential brokering, and its paper names `npm install` as a
+motivating workload. Plus `landrun`, `landstrip`, `Fence`, and `senv` for Python/uv.
+
+### The framing is taken too
+
+`projectkennel` (Apache-2.0, pushed 2026-08-19): *"the postinstall script hunting for
+credentials, reaches your project and nothing else: not `~/.ssh`"* and *"Confinement, not
+detection."* `BX` markets with *"The tools watch what gets written. BX watches what gets
+read."* Writing the landing page would mean writing someone else's.
+
+### The academic precedent, and the commercial one that failed
+
+**Latch** — *"Wolf at the Door: Preventing Install-Time Attacks in npm with Latch"*, ACM
+ASIA CCS 2022. Install-time confinement of npm enforced by a kernel LSM with a
+deny-by-default profile denying `/home/*/.ssh**` and all network. It reports **0.37%
+median overhead, 102/102 malicious packages blocked, and 1.6% of installs falsely
+interrupted**. That 1.6% is the compatibility bar, already measured four years ago. It
+used AppArmor, which needs root to load a profile; the artifact has been dead since
+2022-03-03 and its `cli/` submodule is a zero-byte broken reference, so it cannot be run.
+
+**Phylum shipped this commercially and then removed it.** `phylum npm install` wrapped
+the package manager in Birdcage, their Rust sandbox. Birdcage used **Landlock from
+August 2022 until September 2023**, then deliberately ripped it out — commit 18112cb:
+Landlock *"is currently still too limited to build a 'bulletproof' filesystem
+sandbox... better suited for best-effort isolation of 'assumed safe' applications,
+rather than sandboxing of 'potentially hazardous' software."* Birdcage is archived;
+Phylum is a Veracode legacy platform. Two of those 2023 objections have since aged out
+(ABI v4 on kernel 6.7 added TCP restrictions), but this is the single most useful
+cautionary datum in the whole review. Worth noting separately: `phylum npm` passes
+`read: true` to the sandbox, which maps to a read exception on `/` — so the product that
+built this never actually armed the lectura gate for npm.
+
+## salida — **partial**, and structurally hard
+
+Landlock's network rules take a **port** as their object, never an address — stated
+plainly in the kernel documentation. "Only `registry.npmjs.org`" is inexpressible.
+Every implementation therefore lands somewhere unsatisfying:
+
+- **mise**: per-host filtering is unimplemented on Linux. Its docs say `--allow-net`
+  falls back to allowing everything; its code actually `bail!`s. So the docs' own
+  flagship `npm install` example does not run on Linux at all. It fails closed, but the
+  usable choice is still all-or-nothing — and "no network" means "no install".
+- **nono, cplt**: egress unrestricted by default; blocklists and proxies are opt-in.
+- **`srt` / Claude Code**: solve it properly with `--unshare-net` plus a host-side
+  filtering proxy — but via bubblewrap, not Landlock, and requiring `bubblewrap` and
+  `socat` to be installed.
+- **`senv`** (Python/uv): the best design found — private netns plus **nftables rules
+  pinned to resolved addresses**. This is the working answer to the port-only wall.
+
+Two facts make the salida gate look worse, not better. Shai-Hulud's exfil channel was
+the **GitHub API** — and every "developer" network profile allowlists `api.github.com`.
+And the August 2026 ChainDrop wave resolves its C2 host from an Ethereum contract at run
+time, so domain blocklisting is already dead.
+
+---
+
+## What was *not* found
+
+Stated as in Part I: this is the result of ten lanes plus a critic, and absence at that
+depth is weak evidence of absence. One lane exhausted its web-search budget partway
+through and finished on direct source fetches; its negatives are correspondingly weaker.
+
+1. **No published compatibility matrix** — nobody has released "which real-world npm
+   installs break under a strict Landlock read-deny policy, and why." Latch's 1.6% is
+   the only number, it is four years old, and it is AppArmor.
+2. **No on-by-default posture.** Every tool above is a wrapper you must remember to
+   type. mise's shims mode and Homebrew's `deny_read_home` are the only two exceptions,
+   and neither covers a bare `npm install` on a normal machine.
+3. **Nobody has solved `~/.npmrc`.** firejail — the only distro-shipped npm profile —
+   contains `noblacklist ${HOME}/.npmrc` and `ignore read-only ${HOME}/.npmrc`. The
+   people who already did this work concluded npm needs read **and write** on the exact
+   file the thesis wants to deny. pmg allows it explicitly as a documented trade-off.
+   Private-registry auth, scoped tokens and proxy config all live there.
+4. **No RFC or standards work on install-time read confinement**, in any ecosystem.
+   Searched npm/rfcs, npm/cli, nodejs/node, OpenSSF, OpenJS. Not rejected — absent. The
+   closest is `npm/cli#9193`, an AppArmor profile plus a `deny-info-stealer` abstraction
+   contributed in April 2026, closed in 15 days with one comment.
+5. **No trace data that can answer the `$HOME` question.** See below.
+
+## The measurement question (step 2), re-scoped
+
+Two public datasets record what installs touch: **OSSF package-analysis**
+(`ossf-malware-analysis.packages.analysis` in BigQuery, per-phase `Files` with
+Path/Read/Write/Delete and a phase literally named `install`) and the **OSPtrack** Zenodo
+dump (DOI `10.5281/zenodo.14197378`, 3.3 GB, ~4,645 benign npm packages with raw strace
+logs).
+
+**Both are structurally unable to answer the question that matters.** They were produced
+by running `npm init --force && npm install <pkg>` **as root inside gVisor with
+`HOME=/root`**. No developer dotfiles exist in that environment, so they cannot say
+whether a benign install reads `~/.npmrc`, `~/.aws` or `~/.ssh`. They can say what npm
+needs from `/usr`, `/tmp`, the cache and the toolchain — which is the part already
+answered four times over by hand-tuned allowlists (firejail's `node.profile`, npm/cli
+#9193's AppArmor profile, mise's `SYSTEM_READ_PATHS`, cplt's `generate_policy`).
+
+So a real strace run on a real `$HOME` is still necessary — but **scoped to `$HOME`
+access only**, not to rediscovering `/usr` and `/tmp`. Every existing hand-written
+allowlist is also demonstrably incomplete: none mentions `~/.npm/_tuf` (which npm 10/11
+writes for sigstore verification) or `$HOME/.cache/node/corepack`.
+
+The strongest existing proof that a strict policy is achievable comes from Nix, not from
+any security project: nixpkgs' `npmConfigHook` runs `npm ci` with `HOME="$TMPDIR"`,
+`npm_config_cache` at a prefetched store path, `npm_config_offline=true` and
+`npm_config_nodedir` set — npm completes with **zero** access to the real `$HOME`. Those
+four environment variables are the escape valves any policy should lean on.
+
+## Three standing objections
+
+- **npm v12 narrowed the window this defends.** With dependency scripts off by default,
+  the remaining install-time code is the scripts the developer *approves* — node-gyp,
+  sharp, esbuild, puppeteer — which then run with full ambient authority. Malicious code
+  migrates to first-`require`, build and test time. A policy scoped strictly to
+  `npm install` now guards a door npm has already mostly shut.
+- **GoLeash (2025)** argues process-level policy is too coarse and package-level
+  granularity is required. Landlock-around-npm is exactly the coarse thing.
+- **`Backstabber's Knife Collection`**: 34% of malicious packages are droppers that
+  fetch a second stage. That makes salida — the gate nobody has solved on Linux — not
+  optional.
+
+## The one argument that survives intact
+
+npm's accepted RFC 0054 looked directly at this gate and walked past it:
+
+> *"Sandboxing install scripts (restricting file system or network access) is worth
+> exploring separately, but it is a harder problem with more compatibility risk. An
+> allowlist is simpler."*
+
+An allowlist is a policy check in application code, and a forgotten code path bypasses
+it. This is not hypothetical: **CVE-2025-69264** (CVSS 8.8) let git dependencies run
+`prepare`/`prepublish`/`prepack` through pnpm's fetch phase for a year, because that
+path never consulted the `onlyBuiltDependencies` allowlist. npm's own v12 notes name the
+analogous "Phantom Gyp" gap, where a bare `binding.gyp` bypassed even `--ignore-scripts`.
+
+A Landlock ruleset is not consulted by the application at all. That is the real argument
+for enforcement over allowlisting — and it is an argument for *contributing* the missing
+pieces to the tools above, not for building a ninth one.
+
+## Sources
+
+- [nono](https://github.com/nolabs-ai/nono) · [cplt](https://github.com/navikt/cplt) · [mise sandboxing](https://mise.jdx.dev/sandboxing.html)
+- [Homebrew `landlock.rb`](https://github.com/Homebrew/brew/blob/master/Library/Homebrew/extend/os/linux/sandbox/landlock.rb) · [`cmd/sandbox-exec.rb`](https://github.com/Homebrew/brew/blob/master/Library/Homebrew/cmd/sandbox-exec.rb)
+- [safedep/pmg](https://github.com/safedep/pmg) · [senv](https://github.com/h5i-dev/senv) · [projectkennel](https://github.com/projectkennel/projectkennel) · [landrun](https://github.com/Zouuup/landrun)
+- [@anthropic-ai/sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime)
+- [Latch — Wolf at the Door (ASIA CCS 2022)](https://dl.acm.org/doi/10.1145/3488932.3517391) · [artifact](https://github.com/elizabethwyss/Latch)
+- [Sandlock (arXiv 2605.26298)](https://arxiv.org/abs/2605.26298) · [Birdcage](https://github.com/phylum-dev/birdcage) (archived)
+- [npm RFC 0054](https://github.com/npm/rfcs/blob/main/accepted/0054-install-scripts-allowlist.md) · [npm/cli#9193](https://github.com/npm/cli/issues/9193) · [pnpm#13772](https://github.com/pnpm/pnpm/issues/13772)
+- [Landlock kernel documentation](https://docs.kernel.org/userspace-api/landlock.html) · [landlock.io integrations](https://landlock.io/integrations/)
+- [lockfile-lint](https://github.com/lirantal/lockfile-lint) · [Node.js Permission Model](https://nodejs.org/api/permissions.html) · [Deno security](https://docs.deno.com/runtime/fundamentals/security/)
+- [OSSF package-analysis](https://github.com/ossf/package-analysis) · [OSPtrack (Zenodo 14197378)](https://doi.org/10.5281/zenodo.14197378) · [nixpkgs npmConfigHook](https://nixos.org/manual/nixpkgs/stable/#javascript-buildNpmPackage)
