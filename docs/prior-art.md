@@ -254,7 +254,7 @@ times, by eight independent groups, all shipping, most released within the last 
 |---|---|
 | **entrada** | **exists** — and it was absorbed by the package managers themselves in 2026 |
 | **lectura** | **exists** — Landlock, unprivileged, deny-by-default, applied to the install process tree, covering this exact file list |
-| **salida** | **partial** — nobody has solved per-host egress on Linux; Landlock structurally cannot |
+| **salida** | ~~**partial** — nobody has solved per-host egress on Linux; Landlock structurally cannot~~ **Superseded by Part III: `exists`.** Both halves of this sentence are wrong — see [Corrections to Part II](#corrections-to-part-ii) |
 
 Method: ten parallel search lanes, then adversarial verification of every serious
 candidate against primary sources — repository source files, kernel docs, RFC text,
@@ -395,6 +395,11 @@ built this never actually armed the lectura gate for npm.
 
 ## salida — **partial**, and structurally hard
 
+> **Superseded on 2026-09-05 by Part III.** The verdict is `exists`, the claim that nobody
+> has solved per-host egress on Linux is false, and the ABI figures below are stale. The
+> section is kept as written because the reasoning error in it — inferring from "Landlock
+> cannot" to "Linux cannot" — is the thing Part III had to correct.
+
 Landlock's network rules take a **port** as their object, never an address — stated
 plainly in the kernel documentation. "Only `registry.npmjs.org`" is inexpressible.
 Every implementation therefore lands somewhere unsatisfying:
@@ -510,3 +515,350 @@ pieces to the tools above, not for building a ninth one.
 - [Landlock kernel documentation](https://docs.kernel.org/userspace-api/landlock.html) · [landlock.io integrations](https://landlock.io/integrations/)
 - [lockfile-lint](https://github.com/lirantal/lockfile-lint) · [Node.js Permission Model](https://nodejs.org/api/permissions.html) · [Deno security](https://docs.deno.com/runtime/fundamentals/security/)
 - [OSSF package-analysis](https://github.com/ossf/package-analysis) · [OSPtrack (Zenodo 14197378)](https://doi.org/10.5281/zenodo.14197378) · [nixpkgs npmConfigHook](https://nixos.org/manual/nixpkgs/stable/#javascript-buildNpmPackage)
+
+---
+---
+
+# Part III — The salida gate
+
+Written on 2026-09-05, before building anything. Part II left `salida` as **partial** on
+one sentence — *"nobody has solved per-host egress on Linux; Landlock structurally
+cannot"* — and never asked whether a mechanism other than Landlock could. That question is
+the whole of this part.
+
+Method: ten parallel search lanes, each adversarially verified against primary sources by a
+second agent whose brief was to refute rather than agree, then three critics — one on
+mechanisms not swept, one attacking the premise, one building the strongest case that the
+gate is impossible. Roughly 1,450 tool calls. Eight findings were downgraded in
+classification by verification and none was fabricated; where a claim was settled by
+running something rather than reading something, it says so, and where a measurement is
+the verifier's rather than mine it says that too.
+
+## The answer
+
+**The verdict changes from `partial` to `exists`, and the project's line still ends —
+for a different reason than either of the ones anticipated.**
+
+| question | answer |
+|---|---|
+| is per-host egress control possible on Linux? | **yes**, four ways, one of them unprivileged |
+| has anyone done it for package installation? | **yes** — `nono`, `Fence`, `projectkennel`, `srt`, Harden-Runner |
+| is there a hard reason it cannot be done? | **not a mechanical one.** A semantic one holds |
+| would it stop the attacks in scope? | **no — decisive for 1.4% of them** |
+
+The last row is the finding. It is a negative result, it is measured rather than argued,
+and it is the reason not to build this.
+
+## Corrections to Part II
+
+Four statements in Part II are wrong or stale and should be read as superseded.
+
+1. **"Nobody has solved per-host egress on Linux."** False as written. See below.
+2. **"Landlock ABI v4 added TCP restrictions."** Stale. The current documented ABI is
+   **11**; UDP arrived at **ABI 10**. Seven ABI versions have shipped since network
+   landed and none made an address the object — `struct landlock_net_port_attr` still
+   carries exactly `{allowed_access, port}`.
+3. **Sandlock is listed under `lectura` only.** It ships full per-destination egress
+   (`--net-allow host:port`, CIDR, IPv6, `--net-deny`, protocol pinning, an HTTP
+   method+host+path ACL), unprivileged. We missed half the tool.
+4. **`senv`'s resolve-and-pin design was called "the best design found".** It is
+   structurally unsound for CDN-fronted hosts. Measured below.
+
+## The mechanisms
+
+### Landlock — port-only, and deliberately so — **not found**
+
+Not an oversight awaiting a patch. An address-based rule is an open *discussion* on the
+Landlock tracker with no patch, no review, no rejection; the maintainer has pushed back in
+favour of a coarse localhost/LAN/Internet tri-state rather than a user-supplied IP
+allowlist. `landrun`'s maintainer closed the same request saying it is not going to happen
+with Landlock. Homebrew's `landlock.rb` warns it cannot deny all network below ABI 10.
+`safedep/pmg`'s own `docs/sandbox-landlock.md:117-119` states the limitation independently.
+
+**But this is a fact about Landlock, not about Linux.** Part II's inference from "Landlock
+structurally cannot" to "the gate is unsolved" is a category error, and it is what kept
+`salida` at `partial` for two weeks.
+
+### The single-port composition — **exists**, with a measured hole
+
+`coder/boundary`'s `landjail` backend sidesteps the port-only object instead of fighting
+it: `landjail/child.go:24-30` allows exactly **one** TCP connect port — its own proxy's —
+so the only socket the target can open goes to the proxy, which filters by host. That
+converts a port object into a host gate, unprivileged and without a container.
+
+The verifier measured the hole rather than reasoning about it, with a `ctypes` Landlock
+harness on kernel 6.12.94 (ABI 6 reported): with `CONNECT_TCP` allowed only on 8080,
+`connect()` to `104.16.1.34:8080`, `172.66.147.243:8080` and `8.8.8.8:8080` all returned
+`EINPROGRESS`, while `:443` on the same addresses returned `EACCES`; the inverted control
+flipped exactly. **A port rule permits that port on every host**, and boundary's default is
+`--proxy-port 8080`. Under the same ruleset a UDP query to `8.8.8.8:53` returned a 61-byte
+DNS answer — UDP sits wholly outside the ruleset, so DNS tunnelling and QUIC are
+unrestricted.
+
+### seccomp user notification — **exists**, and the TOCTOU objection does not hold
+
+This was the strongest candidate for a hard reason, and it collapses. Classic seccomp-BPF
+cannot dereference pointers, so `connect(2)`'s `sockaddr` is invisible to it. The user
+notification escape hatch is real, and `seccomp_unotify(2)` is explicit that the naive
+design is unsound: `CONTINUE` "must not be used to make security policy decisions about the
+system call, which would be inherently race-prone". The same page names the two exits, and
+two shipping tools take them:
+
+- **`syd` / sydbox-3** (v3.59.0, 2026-09-01, GPL-3.0) — the supervisor performs the
+  `connect(2)` itself from its own validated copy of the `sockaddr` and never `CONTINUE`s.
+  Per-address, per-CIDR, per-protocol rules as first-class policy. Unprivileged.
+- **`Sandlock`** — `connect_on_behalf` copies the `sockaddr` out of child memory, checks
+  its own copy, duplicates the child's socket with `pidfd_getfd`, and connects. Its source
+  comment says "our copy — immune to TOCTOU".
+
+**`safedep/pmg` is the counterexample that proves the rule.** It does filter `connect` —
+`handleConnect` reads the destination from `/proc/<pid>/mem` — but answers with
+`SECCOMP_USER_NOTIF_FLAG_CONTINUE`, never calls `SECCOMP_IOCTL_NOTIF_ID_VALID`, and its
+Landlock shim installs filesystem rules only, so no second layer constrains the address. A
+worker thread that rewrites the `sockaddr` during the ioctl round trip defeats it. Two
+further facts make this worse for npm specifically: `npm.yml` has no `network` section at
+all and inherits an `npm-restrictive.yml` that also lacks `network_via_proxy_only`, and
+`allowOutbound` returns true unconditionally when lockdown is off
+(`landlock_seccomp_linux.go:661`) — so the registry allowlist in the shipped npm profile is
+not merely unenforced by the kernel, it is inert. `profiles/go.yml:68-72` says so in the
+tool's own words: *"They are NOT kernel-enforced."*
+
+### eBPF / LSM — **partial**, disqualified by privilege
+
+The `socket_connect` LSM hook carries `struct sockaddr *address`
+(`include/linux/lsm_hook_defs.h:340`), so per-destination egress **is** expressible in eBPF
+where it is not in Landlock. Loading a `BPF_PROG_TYPE_LSM` program needs `CAP_BPF` **and**
+`CAP_PERFMON`, and unprivileged `bpf()` is off by default on modern kernels. Against an
+unprivileged `npm install` this is dead. `strongdm/leash`, `bytedance/vArmor`,
+`cilium/tetragon` and KubeArmor (per-domain via `matchDNSQueries`, added 2026-04-27) all
+enforce properly and all need privilege.
+
+### Namespace plus packet filter — **exists**, unprivileged, portability-bound
+
+`senv` confines `uv`/pip installs to a private netns whose nftables ruleset is default-drop
+with accept rules for the exact addresses `pypi.org` and `files.pythonhosted.org` resolved
+to, and refuses to run rather than downgrade. It is Python-only and says so in its own
+non-goals; grepping the tree for `registry.npmjs.org` hits only a lockfile.
+
+On the namespace half, measured here: as uid 1000 with no sudo on Debian 13 / kernel
+6.12.94, `unshare -Urn` and `bwrap --unshare-net` both leave only `lo`
+(`max_user_namespaces` = 15242, `unprivileged_userns_clone` = 1). The verifier additionally
+installed a default-drop nftables output chain carrying `ip daddr … tcp dport 443 accept`
+inside such a namespace; **I could not re-confirm that half, because `nft`, `iptables`,
+`ipset`, `socat` and `slirp4netns` are none of them installed on this machine.** That
+absence is itself the deployment cost: every per-host design found needs software a stock
+Debian install does not carry.
+
+This breaks on Ubuntu 24.04 LTS and later, where the default AppArmor policy permits
+namespace creation but denies capabilities inside it. So: a compatibility matrix and a
+probe-and-refuse path, not a wall.
+
+### Resolve-and-pin — **broken**, and this is the sharpest technical result
+
+The design Part II praised does not survive contact with a shared-anycast CDN.
+`registry.npmjs.org` resolves to twelve stable addresses, `104.16.0.34` through
+`104.16.11.34`, inside Cloudflare's published `104.16.0.0/13`. Pinning them does not pin the
+registry. Measured directly:
+
+```
+curl --resolve discord.com:443:104.16.11.34        -> http=200 ssl_verify=0
+curl --resolve www.cloudflare.com:443:104.16.11.34 -> http=200 ssl_verify=0
+curl --resolve registry.npmjs.org:443:104.16.11.34 -> http=200 ssl_verify=0
+```
+
+All three served from one of the registry's own addresses, all three with a valid
+certificate. Cloudflare's edge routes on SNI, so **the destination address carries no origin
+identity anywhere in the fleet.** An nftables rule pinned to the registry's addresses is a
+rule that also permits `discord.com`. The verifier reports the same for
+`developers.cloudflare.com` and `blog.cloudflare.com`, and notes that `discord.com`'s own A
+records are a disjoint Cloudflare range — so this is not address collision, it is that IP is
+the wrong identity to filter on.
+
+Two 2026 advisories say the same thing from the other direction. Harden-Runner, the most
+mature implementation in existence, carries **GHSA-g699-3x6g-wm3g** (egress bypass via DNS
+over TCP) and **GHSA-46g3-37rh-v698** (bypass via DNS over HTTPS), both 2026-03-16, fixed
+in 2.16.0. The DoH bypass POSTs the query to `dns.google/dns-query` — an allowlisted host —
+and the attacker's nameserver receives the subdomain-encoded payload.
+
+### DNS restriction — **partial**, advisory not enforcement
+
+Bypassed by a raw IP, or by DoH/DoT to a hardcoded resolver. `node-ipc@12.0.1` hardcodes
+`8.8.8.8` and `1.1.1.1` and exfiltrates gzipped tar archives as TXT queries under
+`bt.node.js`. Blocking outbound 53 does not help while the system resolver must stay
+reachable for `registry.npmjs.org` to resolve at all.
+
+## Did the package managers ship anything? — **partial**, and never for scripts
+
+| runtime | what exists | why it does not close the gate |
+|---|---|---|
+| **Yarn Berry** | `networkSettings` / `enableNetwork` — genuine per-hostname, glob-matched policy | enforced only inside Yarn's own HTTP client and its git pre-flight. No purchase on a child process |
+| **Node.js** | `--allow-net` **exists**, added v25.0.0 (2025-10-15) | a bare **boolean**, while `--allow-fs-read` takes a path list. PR #58517 deferred per-host granularity; still deferred |
+| **Deno** | `--allow-net=host:port` with subdomain wildcards, since 2020 | its own docs: subprocesses "run independently from the permissions granted to the parent". npm lifecycle scripts are subprocesses |
+| **npm, pnpm, bun** | nothing | — |
+
+The Node.js asymmetry is the sharpest form of the answer: the permission model reached for
+this gate, and stopped at a boolean.
+
+## Did the eight tools try and abandon it? — mostly they never tried
+
+Three of them ship it, which Part II missed:
+
+- **`nono`** — a CONNECT proxy with a domain allowlist, made unbypassable on Linux by a
+  seccomp-notify supervisor permitting only `127.0.0.1:<proxy_port>`. Opt-in, not default.
+- **`Fence`** — deny-by-default, per-domain via local HTTP and SOCKS5 proxies in a private
+  netns, and it ships an `npm install` recipe allowlisting `registry.npmjs.org`.
+- **`projectkennel`** — per-kennel netns, deny-by-default, `constrained` mode allowlists by
+  name or CIDR over a non-removable deny floor, and names `npm install` as a workload.
+
+Of the rest: **`cplt`** has a CONNECT proxy with allowlists, but on Linux nothing forces
+traffic into it — no netns, no nftables, Landlock port rules only, and enforcement is
+`HTTP_PROXY` injection that any process can unset. **`mise`** implements per-host on macOS
+via Seatbelt and never on Linux; not an abandonment — PR #8845 shipped with the row
+`| Per-host network | Not yet | Seatbelt |` already in its table. **`Homebrew`** is
+all-or-nothing. **`firejail`**'s `netfilter` line in `npm.profile` is inert without `--net=`.
+
+Two explicit declines, which is what the question was really after:
+
+- **`landrun`** — per-destination filtering was requested and the maintainer closed it,
+  saying it is not going to happen with Landlock.
+- **`Birdcage`** — its maintainer stated in 2023 that he knew of no unprivileged
+  self-restricting per-host mechanism. Its brief seccomp network filter was family-level
+  (deny `AF_INET` wholesale) and was removed in favour of an empty namespace. Birdcage is
+  the one project that tried per-host and retreated to all-or-nothing.
+
+## What would break — the three-host hypothesis is wrong
+
+The project assumed registry + github + nodejs.org. Measured union across 26 marked runs
+behind a logging CONNECT proxy (npm 10.9.8, node v22.23.2, one machine, purposive):
+
+`registry.npmjs.org`, `github.com`, `codeload.github.com`,
+`release-assets.githubusercontent.com`, `nodejs.org`, `registry.yarnpkg.com`,
+`tuf-repo-cdn.sigstore.dev`, `download.cypress.io`, `cdn.cypress.io`, `cdn.playwright.dev`,
+`storage.googleapis.com`, `googlechromelabs.github.io`.
+
+Published allowlists agree it is not three. Of GitHub workflows that install with npm/yarn/pnpm
+**and** carry a Harden-Runner allowlist naming `registry.npmjs.org`, only **~7%** fit inside
+the three-host set. GitHub's Copilot coding-agent firewall ships **216** hosts, **17** of them
+in the JavaScript package-manager section.
+
+Specific corrections worth carrying:
+
+- **`registry.yarnpkg.com`** — yarn classic's default registry. A name-based allowlist naming
+  only the npm registry breaks yarn; an IP-pinning one accidentally allows it, since it is a
+  CNAME sharing every address.
+- **`tuf-repo-cdn.sigstore.dev` is not contacted by `npm install`** — only by
+  `npm audit signatures`. `~/.npm/_tuf` is created by the audit command. This corrects an
+  assumption in `install-trace.md`.
+- **`objects.githubusercontent.com` → `release-assets.githubusercontent.com`.** Every npm
+  allowlist written before 2025 naming the old host is now wrong. The cutover date remains
+  unverified.
+- **Git dependencies fall back to `ssh://git@github.com` on port 22** when HTTPS resolution
+  fails — which no HTTPS proxy can see or filter. This is the sharpest result against the
+  proxy-only design that Part II recommended.
+- **Corepack needs three hosts**, and `COREPACK_NPM_REGISTRY` does not redirect the
+  `repo.yarnpkg.com` paths.
+- Moving the other way: `sharp` 0.35.0, `better-sqlite3` 13.0.x and `electron` 42.0.0 all
+  removed their install-time downloads — though electron's maintenance line 41.10.7, published
+  2026-08-25, still ships it.
+
+`node-gyp → nodejs.org` is the one place the hypothesis was exactly right. Its mirror variable
+is `NODEJS_ORG_MIRROR`, not `NVM_NODEJS_ORG_MIRROR`.
+
+**The project's own corpus contributes nothing here.** `install-trace` records file and
+`execve` syscalls only, `$HOME`-scoped; no `connect()`, no DNS, no host appears in any of
+the 960 cells. A clean negative, not a defect — the tracer was built for `lectura`.
+
+## The hard reason that holds
+
+Not mechanical. Semantic, and no kernel feature fixes it:
+
+> **The allowlist small enough to be safe is too small to install with, and every allowlist
+> large enough to install with contains a general-purpose bidirectional data sink.**
+
+`bcrypt@5.1.1`'s approved install script fetches its prebuilt binary from
+`github.com/kelektiv/node.bcrypt.js/releases/download/…`. ChainDrop fetches its Bun
+interpreter from `github.com/oven-sh/bun/releases/download/bun-v1.3.13/`. **Same host, same
+URL shape.** Host granularity cannot separate them. Only request-level policy behind a
+TLS-terminating proxy can — and that is a different product with a CA-install problem.
+
+Note what this does *not* rest on. ECH is real (RFC 9849, Standards Track, March 2026) and
+irrelevant: an HTTP `CONNECT` line and a SOCKS5 `ATYP=0x03` request both carry the hostname
+in plaintext from the client, before any TLS handshake. The "you must MITM npm" branch of the
+argument can be deleted.
+
+## The measurement that decides it
+
+Over the **1,001 hijacked npm packages** (1,443 versions) in DataDog's human-vetted dataset —
+the class `scope.md` declares in scope — a `registry + github + nodejs.org` allowlist is:
+
+| outcome | packages | share |
+|---|---|---|
+| **decisive** — burner sink, no GitHub channel | **14** | **1.4%** |
+| blocks nothing — `api.github.com` is the only sink | 473 | 47.3% |
+| Shai-Hulud family (2nd stage from GitHub releases, exfil to GitHub repos) | 528 | 52.7% |
+| burner sink present, but GitHub channel also present | 186 of 200 | — |
+
+And the target is moving out from under the gate. The no-hook share of compromised
+package-versions went from **4.6% (2025) to 37.1% (2026)**, and the collapse predates npm
+v12 — it tracks the June 9 announcement and the pnpm/Yarn/Bun/Deno defaults. Stated honestly
+at the incident level the drop is much milder, 92.3% to 84.4%, because two monorepo families
+dominate the version count (`@tanstack` 60 samples, `@mastra` 116). All **40** compromised
+`@tanstack` packages have **no install hook** at all; the payload is a 2.3 MB dropped file
+that detonates at import. `node-ipc@12.0.1` has no scripts and exfiltrates over DNS TXT.
+`tj-actions/changed-files` (CVE-2025-30066, 23,000+ repos) exfiltrated by printing secrets
+into the public build log — no socket at all.
+
+## What survives
+
+**One thing, and it is not an allowlist.** Phase separation:
+
+```
+npm install --ignore-scripts     # network on
+unshare -rn npm rebuild          # network off
+```
+
+No Landlock, no root, no bubblewrap, no proxy, no allowlist to maintain — and strictly
+stronger than any allowlist, because it closes the GitHub channel too. Measured cost: of five
+common native packages, `esbuild@0.25.9`, `sharp@0.34.3` and `node-gyp-build@4.8.4` rebuild
+at **zero** egress; `better-sqlite3@11.10.0` and `bcrypt@5.1.1` fail, needing
+`npm_config_nodedir` plus a local toolchain. With `nodedir` set, node-gyp's configure step
+completed offline.
+
+If per-host work is done at all it belongs as a request-level npm profile inside `srt`'s
+existing `filterRequest` hook — the one architecture found that can distinguish
+`GET github.com/kelektiv/…/releases/…` from `POST api.github.com/user/repos` — contributed
+upstream. That is the same conclusion Part II reached for `lectura`.
+
+There is also one defect to report rather than cite: **`safedep/pmg`'s
+`network_via_proxy_only` is defeatable by a second thread** in a malicious install script,
+per the `FLAG_CONTINUE` analysis above. That is a disclosure, not a product.
+
+## What was not found
+
+Same standard as Parts I and II: ten lanes plus three critics, and absence at that depth is
+weak evidence of absence.
+
+1. **No per-host egress control for package installation on a developer workstation that is
+   unprivileged, on by default, and ships a registry-only allowlist.** Every implementation is
+   opt-in, CI-scoped, another ecosystem, or another OS.
+2. **No address-based Landlock rule**, proposed or rejected — only an open discussion of a
+   locality tri-state.
+3. **No published measurement of what a strict egress allowlist breaks for npm.** The ~7%
+   figure above is derived from other people's allowlists, not from a controlled run.
+4. **No prior statement of the 1.4% result.** No campaign census surfaced that asks what
+   fraction of npm exfiltration a registry allowlist would actually stop.
+
+Items 3 and 4 are the only openings left, both are measurements rather than tools, and item 4
+is the one that closed this line.
+
+## Sources
+
+- [syd / sydbox-3](https://crates.io/crates/syd) · [Sandlock](https://github.com/multikernel/sandlock) · [coder/boundary](https://github.com/coder/boundary) · [Fence](https://github.com/fencesandbox/fence)
+- [nono](https://github.com/nolabs-ai/nono) · [projectkennel](https://github.com/projectkennel/projectkennel) · [safedep/pmg](https://github.com/safedep/pmg) · [senv](https://github.com/h5i-dev/senv) · [landrun](https://github.com/Zouuup/landrun)
+- [@anthropic-ai/sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime) · [anthropics/claude-code `init-firewall.sh`](https://github.com/anthropics/claude-code/blob/main/.devcontainer/init-firewall.sh) · [openai/codex `init_firewall.sh`](https://github.com/openai/codex)
+- [StepSecurity Harden-Runner](https://github.com/step-security/harden-runner) · [its security advisories](https://github.com/step-security/harden-runner/security/advisories) — GHSA-g699-3x6g-wm3g (DNS over TCP), GHSA-46g3-37rh-v698 (DoH)
+- [GitHub Actions native egress firewall (technical preview)](https://github.com/github-early-access/actions-native-egress-firewall) · [egress-eddie](https://github.com/capnspacehook/egress-eddie) · [gregclermont/egress-filter](https://github.com/gregclermont/egress-filter)
+- [Landlock kernel documentation](https://docs.kernel.org/userspace-api/landlock.html) (ABI 11) · [`seccomp_unotify(2)`](https://man7.org/linux/man-pages/man2/seccomp_unotify.2.html) · [`lsm_hook_defs.h`](https://github.com/torvalds/linux/blob/master/include/linux/lsm_hook_defs.h)
+- [Node.js permissions](https://nodejs.org/api/permissions.html) (`--allow-net`, v25.0.0) · [Deno permissions](https://docs.deno.com/runtime/reference/permissions/) · [Yarn `networkSettings`](https://yarnpkg.com/configuration/yarnrc#networkSettings)
+- [DataDog malicious-software-packages-dataset](https://github.com/DataDog/malicious-software-packages-dataset) · [Semgrep — ChainDrop](https://semgrep.dev/blog/2026/its-not-npm-ver-yet-npm-worm-chaindrop-hits-400-packages-including-jaredwray-servicetitan-ornikar-qlik-and-nebulajs/) · [Snyk — TanStack](https://snyk.io/blog/tanstack-npm-packages-compromised/)
+- [CVE-2025-30066 / GHSA-mw4p-6x4p-x5m5 — tj-actions/changed-files](https://github.com/tj-actions/changed-files/security/advisories/GHSA-mw4p-6x4p-x5m5) · [RFC 9849 — TLS Encrypted Client Hello](https://www.rfc-editor.org/rfc/rfc9849.html) · [Cloudflare IP ranges](https://www.cloudflare.com/ips-v4)
