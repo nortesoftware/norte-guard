@@ -26,9 +26,21 @@ const read = (dir: string, f: string) => readFileSync(join(dir, f), 'utf-8')
 const sources = new Map(sourceFiles.map(f => [f, read(SRC, f)]))
 const tests = new Map(testFiles.map(f => [f, read(TEST, f)]))
 
-// cli.ts is the binary and watcher.ts is reached through a dynamic import from
-// it; neither is imported by name anywhere else, which is correct.
-const ENTRY_POINTS = new Set(['cli.ts', 'bench.ts', 'fp-bench.ts'])
+// Modules that run as `node dist/<name>.js` rather than being imported: cli.ts
+// is the binary, the rest are measurement drivers. Nothing imports them by name
+// and nothing should. The distinguishing shape is a top-level call to main() —
+// unlike the entries in UNWIRED_MODULES below, these do reach a runtime path,
+// they just enter it from argv instead of from another module.
+//
+// The two install-trace drivers are the ones documented under "Reproducing" in
+// docs/install-trace.md, and they produced install-trace-results/.
+const ENTRY_POINTS = new Set([
+  'cli.ts',
+  'bench.ts',
+  'fp-bench.ts',
+  'install-trace-main.ts',
+  'install-trace-report.ts',
+])
 
 // A debt register, not an exemption. Each entry is code that is written and
 // tested but reaches no runtime path, with the reason it is still here. Adding
@@ -86,6 +98,26 @@ describe('no dead code', () => {
     }
 
     expect(orphans, `modules nothing imports: ${orphans.join(', ')}`).toEqual([])
+  })
+
+  // ENTRY_POINTS is the one list here that asserts code DOES run, so unlike the
+  // debt registers it can be wrong in the dangerous direction: parking a dead
+  // module in it would silence the orphan check above and prove nothing. Hold it
+  // to the property that makes an entry point one — it executes on import.
+  it('every entry point actually executes at top level', () => {
+    const notExecutable: string[] = []
+
+    for (const file of ENTRY_POINTS) {
+      const code = sources.get(file)
+      if (code === undefined) { notExecutable.push(`${file} (no such module)`); continue }
+
+      // Column 0 matters: an unindented statement is top-level, so it runs when
+      // node loads the file. The same call nested in a function proves nothing.
+      const runsOnLoad = /^main\(/m.test(code) || /^if \(process\.argv\[1\]/m.test(code)
+      if (!runsOnLoad) notExecutable.push(file)
+    }
+
+    expect(notExecutable, `entry points that never run: ${notExecutable.join(', ')}`).toEqual([])
   })
 
   it('every exported function is referenced somewhere', () => {
