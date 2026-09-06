@@ -1,0 +1,10 @@
+{
+ "versions": 1443,
+ "marker_versions": 1116,
+ "distinct_files": 64,
+ "distinct_signatures": 56,
+ "singletons": 31,
+ "max_file_versions": 448,
+ "max_sig_versions": 402,
+ "design_effect": 25.8
+}

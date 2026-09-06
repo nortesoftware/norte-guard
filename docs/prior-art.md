@@ -878,6 +878,13 @@ the class `scope.md` declares in scope — a `registry + github + nodejs.org` al
 > Both defects survived a ten-lane review with three critics. Depth of review did not catch
 > either one, because every lane was pointed at whether the *conclusion* was right and none at
 > whether the *table* was arithmetic.
+>
+> **A third defect is worse than either, and it is not ours alone.** The denominator itself
+> is wrong for inference: those 1,443 versions carry only **56 distinct payload signatures**,
+> one file appearing in 448 of them, for a design effect of **25.8**. Every percentage in the
+> table above — including the 52.7% that *does* reproduce — has a confidence interval about
+> five times too narrow. See [design-effect.md](design-effect.md); it applies to any
+> per-package or per-version rate published over this corpus, by anyone.
 
 And the target is moving out from under the gate. The no-hook share of compromised
 package-versions went from **4.6% (2025) to 37.1% (2026)**, and the collapse predates npm
