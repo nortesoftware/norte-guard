@@ -5,9 +5,11 @@ Every unprivileged sandbox for `npm install` — this project's, `bwrap`, rootle
 is permitted, because the answer is not the one the usual framing assumes and it changed
 recently on the most common development distribution.
 
-**Nothing here was executed.** This machine is Debian 13, which does not ship the restriction
-under study. Every behavioural claim below is quoted from kernel source, distro policy files,
-a vendor advisory, or Canonical's own test plan, and the limits are stated at the end.
+This was written from kernel source, distro policy files, a vendor advisory and Canonical's
+own test plan, because this machine is Debian 13 and does not ship the restriction under
+study. **The central prediction has since been executed and confirmed** — see *Verified by
+execution* below. The distro table beyond the Ubuntu rows remains documentation-derived, and
+the limits are stated at the end.
 
 ## The gate is two-part, and that is the whole finding
 
@@ -127,9 +129,50 @@ release since 23.10, GitHub declined to disable it in the runner image
 (`actions/runner-images` #10443, PR #11489 closed "workaround already provided"), and the
 justification is a real CVE history. Plan for this permanently rather than waiting it out.
 
+## Verified by execution
+
+Run 2026-09-06 on GitHub Actions — real Ubuntu kernels, the restriction live, three matrix
+rows each acting as a control for the others
+([`.github/workflows/userns-probe.yml`](../.github/workflows/userns-probe.yml),
+[run 34056166182](https://github.com/nortesoftware/norte-guard/actions/runs/34056166182)).
+
+| row | `unshare -U` | `unshare -Ur` | `CAP_NET_ADMIN` | route capture | verdict |
+|---|---|---|---|---|---|
+| Ubuntu 22.04.5, sysctl `0` | 0 | 0 | 0 | **captured** | PASS (expected PASS) |
+| **Ubuntu 24.04.4, sysctl `1`** | **0** | **1 — `EPERM`** | 1 | — | **FAIL (expected FAIL)** |
+| Ubuntu 24.04.4, sysctl set to `0` | 0 | 0 | 0 | **captured** | PASS (expected PASS) |
+
+**The counterintuitive half is confirmed.** On stock 24.04 the namespace *is* created —
+`unshare -U` returns 0 — and the very next rung fails with the exact predicted error:
+
+```
+unshare: write failed /proc/self/uid_map: Operation not permitted
+```
+
+So a check that asks only "can I create a user namespace?" returns *yes* on a host where every
+capability inside it is gone. That is the two-part gate, executed rather than argued.
+
+The 22.04 row passing is what makes the 24.04 row mean something: the probe works, and the
+difference is the distro policy, not the probe. And the third row confirms the **unblock path
+by execution** — `sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` restores all four
+rungs on the same image, same kernel, same runner.
+
+Incidentally verified on two machines that are not the development box: the destination
+recovery underlying construction C works — with a local default route, a `connect()` aimed at
+an arbitrary external address is delivered to a local listener which recovers the intended
+destination from `getsockname()` (`client aimed at 93.184.216.34:8080, listener recovered
+93.184.216.34:8080`; no external host was contacted). **This confirms the capture mechanism
+functions. It says nothing about whether the resulting jail contains anything** — that is the
+adversarial question, and it remains unrun.
+
 ## Limits
 
-- **No Ubuntu kernel was booted.** Documentation and source only, by design.
+- **The profile remedy is still unverified.** The run confirms the *sysctl* unblock, not the
+  path-attached `flags=(unconfined) { userns, }` profile — which is inference #1 below and the
+  one that matters, because the sysctl disables the mitigation machine-wide and the profile
+  does not. A profile-based row would need a runner step that installs policy as root.
+- **No Ubuntu kernel was booted locally.** The distro table beyond the three executed Ubuntu
+  rows is documentation and source only, by design.
 - Three inferences would change the conclusion if wrong, in priority order:
   1. That a profile attached to a tool's own binary covers a **child** `/usr/bin/unshare`. No
      cited source states this for `unshare`; it is inferred from an equivalent case where the
