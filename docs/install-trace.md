@@ -343,9 +343,27 @@ file at all, and reading is exactly what the measurement says npm does. And the
 `read-only` inherited from a parent profile, not a per-file judgement that npm writes it.
 **firejail's handling is consistent with this measurement, not contradicted by it.**
 
-The honest limit: every fixture resolves from `registry.npmjs.org`. **A private
-registry requiring authentication was not exercised** — verdaccio was not set up. There
-the token is presumably load-bearing, and this measurement does not speak to it.
+The honest limit: every fixture in the matrix above resolves from `registry.npmjs.org`, so
+**the authenticated case is not part of any rate reported here**, and there the token is
+load-bearing in a way this measurement does not speak to.
+
+**Corrected 2026-09-05:** an earlier version of this paragraph said "verdaccio was not set
+up". It was, later the same day, and the artefacts are at `~/.cache/ng-privreg` — Verdaccio
+6.10.0 on `127.0.0.1:4873`, htpasswd auth, a scoped package `@ngpriv/*` configured
+`access: $authenticated`, and a token written to a fixture `.npmrc`. Two arms ran and they
+disagree:
+
+| manager | outcome |
+|---|---|
+| npm 10.9.8 | installs the private package — `added 1 package in 672ms` |
+| bun 1.4.0 | **fails** — `GET https://registry.npmjs.org/@ngpriv%2fsecret-lib - 404`, then `failed to resolve` |
+
+bun went to the public registry rather than the scope's configured one. pnpm and yarn were
+never run, and the invocation that produced the bun failure was not recorded, so whether
+`HOME` reached bun as intended is **unverified** — the result is a lead, not a measurement,
+and it is not folded into any table above. It matters because the `~/.npmrc` conclusion
+below rests on public-registry installs: this is precisely the condition under which
+denying that file should cost something.
 
 ## The `$HOME` surface, per manager
 
@@ -379,9 +397,16 @@ rather than content access will vastly overstate what is needed.
 - **Only yarn 1.22.22 (classic).** Yarn Berry with PnP has no `node_modules` at all and
   a different cache layout; it was not measured.
 - **Only one forced source build**, n=1, one package, C not C++. `~/.cache/node-gyp` is
-  established as necessary; the full set of paths a heavier native build needs
-  (`better-sqlite3` from source, anything using `pkg-config` or system headers) is not.
-- **No private registry with authentication.**
+  established as necessary; the full set of paths a heavier native build needs is not.
+  **Partly closed 2026-09-05** by the phase-separation run in
+  [prior-art.md](prior-art.md#the-cost-measured): `better-sqlite3@11.10.0` builds from source
+  at zero egress given a local toolchain and headers from either `npm_config_nodedir` or a
+  warm `~/.cache/node-gyp`, and the `pkg-config` class is now measured from the other side —
+  `canvas`, `keytar` and `mongodb-client-encryption` fail their source fallback on absent
+  `pkg-config`, `libsecret` and `libmongocrypt`, none installable without root.
+- **No private registry with authentication in any reported rate.** A Verdaccio fixture was
+  later stood up and npm and bun disagree on it (see the corrected paragraph above); pnpm and
+  yarn were never run, and the bun failure's invocation was not recorded.
 - **Warm caches only.**
 - **This is mount-namespace enforcement, not Landlock.** What a manager *needs*
   transfers directly to a Landlock policy. The *failure modes* do not, and the yarn

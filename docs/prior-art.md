@@ -611,17 +611,33 @@ two shipping tools take them:
   its own copy, duplicates the child's socket with `pidfd_getfd`, and connects. Its source
   comment says "our copy — immune to TOCTOU".
 
-**`safedep/pmg` is the counterexample that proves the rule.** It does filter `connect` —
-`handleConnect` reads the destination from `/proc/<pid>/mem` — but answers with
-`SECCOMP_USER_NOTIF_FLAG_CONTINUE`, never calls `SECCOMP_IOCTL_NOTIF_ID_VALID`, and its
-Landlock shim installs filesystem rules only, so no second layer constrains the address. A
-worker thread that rewrites the `sockaddr` during the ioctl round trip defeats it. Two
-further facts make this worse for npm specifically: `npm.yml` has no `network` section at
-all and inherits an `npm-restrictive.yml` that also lacks `network_via_proxy_only`, and
-`allowOutbound` returns true unconditionally when lockdown is off
-(`landlock_seccomp_linux.go:661`) — so the registry allowlist in the shipped npm profile is
-not merely unenforced by the kernel, it is inert. `profiles/go.yml:68-72` says so in the
-tool's own words: *"They are NOT kernel-enforced."*
+**`safedep/pmg` is the counterexample that proves the rule** — but for npm the filter is
+**inert, not racy**, and an earlier version of this paragraph led with the wrong half.
+Re-verified at HEAD `f59230f` (2026-09-05).
+
+Where the filter *is* armed, the race is real and the vendor documents it: `handleConnect`
+reads the destination from `/proc/<pid>/mem` (`landlock_seccomp_linux.go:788-809`), answers
+with `SECCOMP_USER_NOTIF_FLAG_CONTINUE` (`:811-815`, `:1008-1014`), and the Landlock shim
+installs filesystem rules only — `AccessNetSet` appears nowhere in the tree — so no second
+layer constrains the address. `SECCOMP_IOCTL_NOTIF_ID_VALID` is genuinely absent, though it
+guards a different failure and is not the mitigation for a `CONTINUE` race.
+
+For npm none of that is reached. `connect`/`sendto`/`sendmsg` enter the BPF trap set **only
+under lockdown** (`landlock_seccomp_linux.go:159-170`), lockdown derives solely from
+`network_via_proxy_only`, and that key is set in exactly **two of seventeen** shipped
+profiles — `go.yml:19` and `cargo.yml:23`, the latter added 2026-08-24. `handleConnect`
+short-circuits to `CONTINUE` on its first statement when lockdown is off (`:766-770`), so
+the kernel never traps `connect(2)` for an npm install and there is no ioctl round trip to
+race. Describing npm as defeated by a second thread is wrong; the correct statement is that
+the filter is never installed.
+
+The allowlist is nonetheless unenforced, which is the finding that survives.
+`npm-restrictive.yml:84-94` **does** carry a `network` section with a full `allow_outbound`
+list and a `deny_outbound: '*:*'` — present since 2026-01-13 — and `npm.yml` inherits it. An
+earlier phrasing here implied that file had no network policy; it has one, enforced by
+nothing on any of the three backends. `allowOutbound` returns true unconditionally when
+lockdown is off (`landlock_seccomp_linux.go:661`, line-exact today). `profiles/go.yml:68-73`
+says it in the tool's own words: *"They are NOT kernel-enforced."*
 
 ### eBPF / LSM — **partial**, disqualified by privilege
 
@@ -703,8 +719,17 @@ this gate, and stopped at a boolean.
 
 Three of them ship it, which Part II missed:
 
-- **`nono`** — a CONNECT proxy with a domain allowlist, made unbypassable on Linux by a
-  seccomp-notify supervisor permitting only `127.0.0.1:<proxy_port>`. Opt-in, not default.
+- **`nono`** — a CONNECT proxy with a domain allowlist. Opt-in, not default. **Corrected:**
+  an earlier version of this line said it was "made unbypassable on Linux by a seccomp-notify
+  supervisor permitting only `127.0.0.1:<proxy_port>`". That describes a fallback path, not
+  the mechanism. On Landlock ABI ≥ 4 nono confines egress with Landlock `NetPort` /
+  `AccessNet::ConnectTcp` rules (`crates/nono/src/sandbox/linux.rs:1133,1156,1183,1207`) and
+  the seccomp supervisor is the path taken only on kernels without `AccessNet`
+  (`linux.rs:1029-1044`) — unreachable on this project's own test machine (6.12.94, ABI 6).
+  Landlock's network object is a **port**, so what confines egress there is port-only: the
+  precise limitation Part II established, reappearing in the tool this document cited as the
+  counterexample to it. Not re-tested against a running nono — no Rust toolchain here — so
+  this is a source reading, and the bypass it implies is unverified.
 - **`Fence`** — deny-by-default, per-domain via local HTTP and SOCKS5 proxies in a private
   netns, and it ships an `npm install` recipe allowlisting `registry.npmjs.org`.
 - **`projectkennel`** — per-kennel netns, deny-by-default, `constrained` mode allowlists by
@@ -810,28 +835,188 @@ into the public build log — no socket at all.
 
 ## What survives
 
-**One thing, and it is not an allowlist.** Phase separation:
+**One thing, and it is not an allowlist** — but it is not this project's invention, the
+command as first published here was wrong in two ways, and measured against a real corpus it
+does not reach the bar a tool would need. All three corrections are below, and they supersede
+the version of this section written in `3cf11b9`.
 
 ```
-npm install --ignore-scripts     # network on
-unshare -rn npm rebuild          # network off
+npm install --ignore-scripts        # network on
+unshare -cn npm rebuild             # network off
+unshare -cn npm run prepare         # the root's own prepare family
+unshare -cn npm run prepublish
 ```
 
-No Landlock, no root, no bubblewrap, no proxy, no allowlist to maintain — and strictly
-stronger than any allowlist, because it closes the GitHub channel too. Measured cost: of five
-common native packages, `esbuild@0.25.9`, `sharp@0.34.3` and `node-gyp-build@4.8.4` rebuild
-at **zero** egress; `better-sqlite3@11.10.0` and `bcrypt@5.1.1` fail, needing
-`npm_config_nodedir` plus a local toolchain. With `nodedir` set, node-gyp's configure step
-completed offline.
+### Correction 1 — `-cn`, not `-rn`
+
+`-r` is `--map-root-user`, so phase 2 runs as uid 0 inside a user namespace. node-tar
+restores archived ownership, and an `lchown` back to uid 1000 from a namespace that maps only
+1000→0 fails with `EINVAL` — which is exactly how node-gyp unpacks the Node header tarball.
+Measured both directions, util-linux 2.41:
+
+| wrapper | `id -u` | `lchownSync(f,1000,1000)` | netns |
+|---|---|---|---|
+| `unshare -rn` | 0 | **`EINVAL`** | only a DOWN `lo`, DNS exits 2 |
+| `unshare -cn` | 1000 | OK | identical |
+
+With the network **on** and uid 0, **6 of 29** native packages break on
+`TAR_ENTRY_ERROR EINVAL: invalid argument, fchown` — `sqlite3`, `cpu-features`, `node-pty`,
+`segfault-handler`, `grpc`, `keytar`; grpc's log carries 2,725 of them.
+
+In a *network-free* namespace the flag changes no outcome, because DNS fails before
+extraction is ever reached: paired over the same 29 packages, `-rn` vs `-cn` yields zero
+discordant cells in both the bare and the `nodedir` arm (McNemar exact p = 1.0, b = c = 0).
+The cost of the wrong flag was therefore not a wrong rate. It was **six causal attributions
+that were not safe to make** — each of those six failures was overdetermined by two
+independently sufficient causes, and only re-measuring under `-cn` established that the
+network attribution stands on its own.
+
+### Correction 2 — the two-line form is not equivalent to `npm install`
+
+Measured on a synthetic fixture, 2/2 reproducible. `npm install --ignore-scripts && npm
+rebuild` never runs the root project's `prepublish`, `preprepare`, `prepare` or
+`postprepare`, nor the clone-internal pass npm performs inside a git dependency.
+`--foreground-scripts` closes nothing — its marker sequence is byte-identical. Appending
+`npm run prepare && npm run prepublish` recovers the root hooks exactly; **the git-dependency
+gap is irreducible** by any command sequence tried, so any corpus containing git deps is
+measuring a different install and must say so.
+
+Related, and a property of the design rather than a defect to report: **phase 1 is not
+script-free on npm 10.x.** `npm install --ignore-scripts` still executes `prepare` for git
+deps and `file:` directory deps (`pacote@19.0.2 lib/dir.js:30-53`, no `ignoreScripts` check),
+and `npm rebuild --ignore-scripts` does the same for link deps
+(`@npmcli/arborist@8.0.5 lib/arborist/rebuild.js:157-159`, the guard omitted) — in the phase
+where the network is still on. Both are fixed in **npm 12.0.2**, verified in source and by
+running it (phase 1 there produces zero markers). Upstream got there first; the mitigation is
+`npm >= 12`, or no git/`file:` dependencies.
+
+### Correction 3 — the shape is four years old and belongs to Nix
+
+Part III must not be read as claiming this pattern. `npm ci --ignore-scripts` followed by
+`npm rebuild` with the second half denied network is nixpkgs' `buildNpmPackage`, shipped
+since **2022-09-03** — `npm-config-hook.sh:125` and `:141`, with `npm_config_nodedir` already
+at `:17-18`, across ~573 nixpkgs files. Guix's `node-build-system` reaches the same
+discipline independently (`node-build-system.scm:300-306`). `unshare -n` around the npm
+script phase specifically is shipped by `Brooooooklyn/script-jail`
+(`src/guest/agent.ts:2091-2093`). The temporal split as a security control is LavaMoat
+`allow-scripts`, years old. This document already credited nixpkgs' `npmConfigHook` for the
+four environment escape valves; it should have credited it for the command shape too.
+
+What nobody has published is the **cost**, and that is the only thing left to contribute.
+npm's accepted RFC 0054 names network sandboxing of install scripts and sets it aside as
+"more compatibility risk", citing nothing. script-jail's `design.md:172-174` declines the
+offline phase because "real lifecycle scripts fetch prebuilt binaries", citing nothing.
+nixpkgs and Guix pay the cost per-package and never count it. Latch (ASIA CCS 2022) has the
+only adjacent numbers and they are different quantities: 102,900/385,798 = 26.7% of
+install-script-bearing package-versions *attempt* a remote connect, and its 1.5%/1.6% is a
+violation rate for a conjunctive policy — neither asks whether the install still completes.
+
+### The cost, measured
+
+29 native, install-hook-carrying packages, each in its own tree with its own empty npm cache
+and a fresh `$HOME`; three further packages excluded because they fail `npm install` with
+scripts and network fully on (`fsevents` darwin-only, `node-sass@9` truncated prebuild,
+`libpq` missing headers). Phase-2 uid recorded per cell.
+
+| arm | `rc == 0` | 95% Wilson |
+|---|---|---|
+| bare — `unshare -cn npm rebuild`, no `nodedir` | 18/29 = 62.1% | 44.0–77.3% |
+| **+ `npm_config_nodedir` + headers on disk** | **24/29 = 82.8%** | **65.5–92.4%** |
+| + a warm prebuild cache as well | 28/29 = 96.6% | 82.8–99.4% |
+
+On the stricter scoring — `rc == 0` **and** an offline smoke test passes **and**, for the 14
+packages that demonstrably do work under the networked control, work actually appeared on
+disk — the `nodedir` arm is 23/29 = **79.3%** (61.6–90.2%).
+
+**The eleven bare-form failures decompose exactly, and the three numbers sum:**
+
+| cause | n | packages |
+|---|---|---|
+| **node-gyp fetching `nodejs.org`** for the headers of the interpreter already running the build | **6** | `cpu-features`, `grpc`, `node-pty`, `re2`, `segfault-handler`, `sqlite3` |
+| genuine third-party egress | 5 | `@tensorflow/tfjs-node`, `cypress`, `canvas`, `keytar`, `mongodb-client-encryption` |
+| uid | **0** | — |
+
+Six of eleven are one bind mount away from fixed, with no network involved: the two arms
+differ in exactly two binds, and the preloaded header cache is untouched by the run (3,327
+entries before, 3,327 after). This corrects the earlier claim that `better-sqlite3@11.10.0`
+needs "`npm_config_nodedir` plus a local toolchain" — measured, it needs the **toolchain**;
+the headers may come from `npm_config_nodedir` *or* from a warm `~/.cache/node-gyp`, and with
+the cache warm and `nodedir` unset the offline build still succeeds.
+
+Three of the five remaining failures — `canvas`, `keytar`, `mongodb-client-encryption` — are
+overdetermined by a machine artefact: denied their prebuilt download they fall back to a
+source build and die on `pkg-config`, `libsecret` or `libmongocrypt`, none of which is
+installable here without root. Whether a fully provisioned host builds them offline was
+**not measured and must not be assumed** — the one counterfactual available (network restored,
+same uid-preserving wrapper, same preloaded headers, netns removed and nothing else) passes
+all five, so restoring the network alone is sufficient and no offline claim about them has
+evidence behind it.
+
+### What the number does not support
+
+**It does not clear 90%.** Both point estimates fall below it and both intervals cross it,
+and they cross it largely because 15 of the 29 cells cannot discriminate: under the
+*networked* control those packages are already no-ops — the hook runs, exits 0 and changes
+nothing, because phase 1 already unpacked the platform binary. Restricted to the 14 packages
+where phase 2 demonstrably does work with the network on, the `nodedir` arm is 9/14 = 64.3%
+(38.8–83.7%) on `rc == 0` and 8/14 = 57.1% (32.6–78.6%) on the stricter scoring — both
+intervals entirely below 90%.
+
+**"Strictly stronger than any allowlist" was published without a cost figure.** It closes the
+GitHub channel an allowlist cannot, and that remains true. The price is the table above.
+
+**The frame is a popularity draw, not an adversarial one.** The 59 candidates are ordered
+strictly descending by weekly downloads (`esbuild` 275M → `sharp-cli` 54k) and the names were
+picked as known hook carriers, not as hard cases. So these rates are **not** a ceiling on
+breakage, and any project-level composition arithmetic built on them reads **optimistic**,
+not pessimistic. Corrected here because the first write-up of this run asserted the opposite.
+
+**Almost nothing in the registry is affected at all.** Of the 100-package `install-trace`
+frame, **0** declare an install hook; a second, independently drawn popularity frame is also
+0/100 (pooled 178 unique packages, 95% Wilson upper bound 2.11%). Across this project's own
+2,616-package fp-bench harvest pool, **24 = 0.92%** carry one. Popularity-weighted npm is now
+essentially script-free, so phase separation costs the median package nothing, and the entire
+cost question lives inside about 1% of the registry.
+
+**And exit codes cannot see the failure that matters.** `puppeteer@25.10.0` under
+confinement exits 0, prints `rebuilt dependencies successfully`, and passes `require()` —
+having done nothing at all: 0 changed non-directory entries in the package directory, in
+`node_modules`, and in `$HOME`, where the same command with the network on writes 590 (the
+Chrome download). It is visible here only because the harness diffs `$HOME` too. Worse, with
+`~/.cache/puppeteer` pre-warmed the row is byte-identical to the unseeded one — same rc, same
+manifest diff — yet one tree would launch a browser and the other would not. **This is a hard
+limit on any sandbox-compatibility measurement scored by exit code, this one included**, and
+it is why the stricter scoring exists. Four of 29 packages pass with a warm prebuild cache
+while failing without it, so a warm cache genuinely stands in for the network — a result the
+earlier arm could not produce, because its cache source was empty and its "no masking found"
+was a statement about an empty directory.
 
 If per-host work is done at all it belongs as a request-level npm profile inside `srt`'s
 existing `filterRequest` hook — the one architecture found that can distinguish
 `GET github.com/kelektiv/…/releases/…` from `POST api.github.com/user/repos` — contributed
 upstream. That is the same conclusion Part II reached for `lectura`.
 
-There is also one defect to report rather than cite: **`safedep/pmg`'s
-`network_via_proxy_only` is defeatable by a second thread** in a malicious install script,
-per the `FLAG_CONTINUE` analysis above. That is a disclosure, not a product.
+### Retraction — the `safedep/pmg` disclosure
+
+An earlier version of this section said: *"There is also one defect to report rather than
+cite: `safedep/pmg`'s `network_via_proxy_only` is defeatable by a second thread in a
+malicious install script… That is a disclosure, not a product."*
+
+**Withdrawn. It is a citation, not a finding, and the mechanism was described wrongly.**
+
+The vendor documents it. `docs/sandbox-landlock.md:178-181`, under a heading titled
+*"Network lockdown gaps"*: *"**TOCTOU on the sockaddr.** Between the supervisor's memory read
+and the kernel executing a `CONTINUE`d syscall, a second thread in the target can rewrite the
+address. Same class as the existing openat TOCTOU; adequate for benign install scripts, not a
+hardened defense against determined escapes."* That text was present in the checkout used to
+write the claim. `docs/sandbox-landlock.md:216-223` adds that Landlock V4 port rules "would
+be a race-free backstop for the passthrough cases", and maintainer issue **#369** (open,
+2026-07-10) states the inert-allowlist half in his own words: *"today, sandbox allow_outbound
+lists are documentation only."*
+
+And for npm the race is the wrong mechanism entirely — see the corrected paragraph above.
+Nothing was sent. This is the same failure mode the check-before-publishing rule exists to
+catch, caught at the same stage by the same rule.
 
 ## What was not found
 
