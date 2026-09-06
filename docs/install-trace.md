@@ -208,6 +208,27 @@ catches `ENOENT` and `EISDIR` and returns `{}`, but **rethrows `EACCES`**:
 }
 ```
 
+> **Correction, 2026-09-06 — this code is real but it is not what crashes on `~/.npmrc`,
+> and the mechanism underneath is more general than the one published here.**
+>
+> The cplt maintainer rejected this attribution in merged PR #234, and re-measuring under a
+> built nono 0.75.0 shows they were right. `parseRcPaths` has exactly one caller,
+> `getRcConfigForCwd` (`cli.js:57500`), which passes the literal `'yarn'` — so it only ever
+> reads the `.yarnrc` family and `~/.npmrc` never reaches it. The `~/.npmrc` abort is
+> `NpmRegistry.getPossibleConfigLocations`: an `fs.exists` gate at `cli.js:31908` followed by
+> an **unguarded** `fs.readFile` at `cli.js:31911`. Both mechanisms exist; the wrong one was
+> attached to the wrong file.
+>
+> **Why a find-then-open loader is defeated specifically by Landlock:** Landlock mediates
+> `open(2)` but **not** `stat(2)` or `faccessat(2)`. So `fs.exists` / `access(R_OK)`
+> affirmatively reports a *denied* file as present and readable, the guard passes, and the
+> subsequent `open` throws `EACCES` into code that never expected to reach it. Any
+> check-then-use config loader is lied to by the kernel here, which is why this class of bug
+> appears under Landlock and not under a mount-namespace policy that removes the path
+> outright. That is the transferable finding, and it is not yarn-specific.
+>
+> The conclusion below is unchanged — it never depended on which function threw.
+
 That asymmetry decides which sandboxes yarn survives:
 
 - a policy that **hides** the path (mount namespace, `ProtectHome=tmpfs`) yields `ENOENT`
@@ -368,6 +389,18 @@ denying that file should cost something.
 ## The `$HOME` surface, per manager
 
 Distinct prefixes touched in the `normal-random` stratum:
+
+> **Read this as what each manager TOUCHES, not as what it REQUIRES. Added 2026-09-06.**
+> These prefixes were traced with `$HOME` present and unconfined, and the pass/fail policy
+> arms above denied paths by *removing* them (`ProtectHome=tmpfs`, `InaccessiblePaths=`),
+> which yields `ENOENT`. A Landlock allowlist leaves the path visible and denies `open`,
+> which yields `EACCES`, and the managers diverge sharply between the two conditions.
+> Measured under a built nono 0.75.0 with `$HOME` present-but-read-only: **pnpm completes an
+> install anyway**, relocating its store from the ungranted `~/.local/share/pnpm` to a
+> project-local `.pnpm-store` and merely warning on the denied `~/.npmrc`. **npm does not** —
+> it aborts `EACCES` on `~/.npm`, and one read-write grant of that single path fixes it.
+> So a policy author must not read "9 prefixes" as "9 required grants": for pnpm under
+> Landlock the required set is empty, and for npm it is one.
 
 | manager | count | prefixes |
 |---|---|---|
