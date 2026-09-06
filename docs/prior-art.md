@@ -862,6 +862,22 @@ the class `scope.md` declares in scope — a `registry + github + nodejs.org` al
 > touches: a registry+github+nodejs.org allowlist is decisive for a **small minority** of this
 > corpus, and the Shai-Hulud majority is immune to it by construction. The specific figure
 > 1.4% is withdrawn.
+>
+> **The two method defects are the finding, not the arithmetic.** They are worth at least as
+> much as any number that would replace them, and both are cheap to check for:
+>
+> - **A table whose rows do not sum to its denominator was never audited against it.** 1,015
+>   against 1,001, and 101.4% of a corpus, printed and published. No reader caught it and
+>   neither did the author. Sum every partition against its stated denominator before it ships.
+> - **A residual bucket is not a measurement, and naming it after a mechanism makes it look
+>   like one.** "Blocks nothing — `api.github.com` is the only sink" reads as a finding about
+>   473 packages. It was `1,001 − 528` wearing a mechanism's name, and 341 of those packages
+>   never contained the string. A bucket defined by subtraction must be labelled *residual*
+>   and must never be given a causal name.
+>
+> Both defects survived a ten-lane review with three critics. Depth of review did not catch
+> either one, because every lane was pointed at whether the *conclusion* was right and none at
+> whether the *table* was arithmetic.
 
 And the target is moving out from under the gate. The no-hook share of compromised
 package-versions went from **4.6% (2025) to 37.1% (2026)**, and the collapse predates npm
