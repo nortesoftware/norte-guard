@@ -1,0 +1,143 @@
+name: userns probe
+
+# Measures whether an unprivileged user namespace can be created AND whether the
+# process holds capabilities inside it — the two-part gate described in
+# docs/userns-availability.md. That document was written from documentation only;
+# this workflow is the execution it says is missing.
+#
+# Matrix is designed so each row is a control for the others:
+#   ubuntu-22.04            predates the AppArmor restriction  -> expect PASS
+#   ubuntu-24.04            restriction on by default          -> expect FAIL
+#   ubuntu-24.04 + sysctl 0 tests the documented unblock       -> expect PASS
+# A 22.04 failure would mean the probe itself is wrong, not the distro.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            disable_restriction: false
+            expect: PASS
+          - os: ubuntu-24.04
+            disable_restriction: false
+            expect: FAIL
+          - os: ubuntu-24.04
+            disable_restriction: true
+            expect: PASS
+    name: ${{ matrix.os }}${{ matrix.disable_restriction && ' (restriction disabled)' || '' }}
+    steps:
+      - name: Environment
+        run: |
+          echo "::group::identity"
+          . /etc/os-release; echo "distro: $PRETTY_NAME"
+          uname -r; id; unshare --version
+          echo "::endgroup::"
+          echo "::group::userns knobs"
+          for k in kernel/unprivileged_userns_clone user/max_user_namespaces \
+                   kernel/apparmor_restrict_unprivileged_userns \
+                   kernel/apparmor_restrict_unprivileged_unconfined; do
+            printf '%-52s ' "$k"; cat /proc/sys/$k 2>&1 || true
+          done
+          echo "::endgroup::"
+          echo "::group::apparmor"
+          cat /sys/module/apparmor/parameters/enabled 2>&1 || true
+          ls /sys/kernel/security/apparmor/features/namespaces/ 2>&1 || true
+          ls /etc/apparmor.d/ 2>/dev/null | grep -Ei 'unpriv|unshare|bwrap|userns' || echo "(no matching profiles)"
+          echo "::endgroup::"
+
+      - name: Disable the restriction (unblock path under test)
+        if: matrix.disable_restriction
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+
+      # Each step below is deliberately non-fatal: the point is to record which
+      # rung of the ladder the environment stops at, not to stop at the first one.
+      - name: 'A: bare user namespace  (unshare -U)'
+        id: a
+        run: |
+          set +e
+          out=$(unshare -U true 2>&1); rc=$?
+          echo "rc=$rc  out=$out"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+
+      - name: 'B: userns + uid map  (unshare -Ur)  <-- the step 24.04 is expected to deny'
+        id: b
+        run: |
+          set +e
+          out=$(unshare -Ur true 2>&1); rc=$?
+          echo "rc=$rc  out=$out"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          echo "note: EPERM here is the uid_map write, not unshare(2) itself"
+
+      - name: 'C: capabilities inside the namespace  (CAP_NET_ADMIN)'
+        id: c
+        run: |
+          set +e
+          out=$(unshare -Urn sh -c 'ip link set lo up && ip -o link show lo' 2>&1); rc=$?
+          echo "rc=$rc"; echo "$out"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+
+      - name: 'D: construction C end to end  (ip route add local default dev lo)'
+        id: d
+        run: |
+          set +e
+          cat > /tmp/probe.py <<'PY'
+          import socket, subprocess, sys, threading
+          # Listener inside the namespace. With a local default route every address
+          # is local, so any connect() should land here regardless of destination.
+          srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+          srv.bind(("0.0.0.0", 8080)); srv.listen(8)
+          got = []
+          def accept():
+              try:
+                  c, peer = srv.accept()
+                  got.append(c.getsockname())   # the address the client AIMED at
+                  c.close()
+              except Exception as e:
+                  got.append(("err", str(e)))
+          t = threading.Thread(target=accept, daemon=True); t.start()
+          cl = socket.socket(); cl.settimeout(5)
+          target = ("93.184.216.34", 8080)      # arbitrary external address, never contacted
+          try:
+              cl.connect(target); ok = True
+          except Exception as e:
+              ok = False; err = str(e)
+          t.join(timeout=5)
+          if ok and got and got[0][0] != "err":
+              print(f"CAPTURED: client aimed at {target[0]}:{target[1]}, "
+                    f"listener recovered {got[0][0]}:{got[0][1]}")
+              sys.exit(0)
+          print("NOT CAPTURED:", "connect failed: " + err if not ok else f"no accept, got={got}")
+          sys.exit(1)
+          PY
+          out=$(unshare -Urn sh -c '
+            ip link set lo up
+            ip route add local default dev lo
+            python3 /tmp/probe.py
+          ' 2>&1); rc=$?
+          echo "rc=$rc"; echo "$out"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+
+      - name: Verdict
+        if: always()
+        run: |
+          A='${{ steps.a.outputs.rc }}'; B='${{ steps.b.outputs.rc }}'
+          C='${{ steps.c.outputs.rc }}'; D='${{ steps.d.outputs.rc }}'
+          echo "| step | rc | meaning |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| A unshare -U | ${A:-?} | namespace creatable |" >> $GITHUB_STEP_SUMMARY
+          echo "| B unshare -Ur | ${B:-?} | uid_map writable |" >> $GITHUB_STEP_SUMMARY
+          echo "| C CAP_NET_ADMIN | ${C:-?} | capabilities inside |" >> $GITHUB_STEP_SUMMARY
+          echo "| D construction C | ${D:-?} | forced interception |" >> $GITHUB_STEP_SUMMARY
+          if [ "$D" = "0" ]; then V=PASS; else V=FAIL; fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**${{ matrix.os }}${{ matrix.disable_restriction && ' + sysctl=0' || '' }}: $V** (expected ${{ matrix.expect }})" >> $GITHUB_STEP_SUMMARY
+          echo "VERDICT $V (expected ${{ matrix.expect }})"
