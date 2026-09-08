@@ -1179,3 +1179,365 @@ is the one that closed this line.
 - [Node.js permissions](https://nodejs.org/api/permissions.html) (`--allow-net`, v25.0.0) · [Deno permissions](https://docs.deno.com/runtime/reference/permissions/) · [Yarn `networkSettings`](https://yarnpkg.com/configuration/yarnrc#networkSettings)
 - [DataDog malicious-software-packages-dataset](https://github.com/DataDog/malicious-software-packages-dataset) · [Semgrep — ChainDrop](https://semgrep.dev/blog/2026/its-not-npm-ver-yet-npm-worm-chaindrop-hits-400-packages-including-jaredwray-servicetitan-ornikar-qlik-and-nebulajs/) · [Snyk — TanStack](https://snyk.io/blog/tanstack-npm-packages-compromised/)
 - [CVE-2025-30066 / GHSA-mw4p-6x4p-x5m5 — tj-actions/changed-files](https://github.com/tj-actions/changed-files/security/advisories/GHSA-mw4p-6x4p-x5m5) · [RFC 9849 — TLS Encrypted Client Hello](https://www.rfc-editor.org/rfc/rfc9849.html) · [Cloudflare IP ranges](https://www.cloudflare.com/ips-v4)
+
+---
+---
+
+# Part IV — Four directions, checked before building
+
+Written on 2026-09-08, before building anything.
+
+Parts I to III each ended the same way: the mechanism was published, and what survived
+was a measurement. The four directions here were chosen to escape that pattern by
+changing the assumption underneath it — that the defender is whoever runs
+`npm install`, that the unit of analysis is the package, that the name is the
+attack, and that the payload has to be executed to be seen.
+
+None of them escapes it. All four are taken.
+
+Method: 24 search lanes, six per direction, then one synthesis per direction, then
+four adversarial agents whose success condition was **finding** prior art rather than
+refuting it — the inversion matters, because the expensive failure here is a false
+`not found`, which is the shape the `ltidi` near miss had. Roughly 3,400 tool calls.
+Three of the four residual claims were broken by that adversarial pass and the
+verdicts below already reflect it.
+
+**Two method defects, stated because they bound what the verdicts are worth.**
+First, the 200-call `WebSearch` budget was exhausted early, and every general engine
+reachable by other means was CAPTCHA-walled or serving cloaked results. Lanes fell
+back to the arXiv, OpenAlex, Crossref, Semantic Scholar and GitHub APIs plus direct
+fetches, and later agents worked the vendor channel by crawling sitemaps, `llms.txt`
+files and alert catalogues and grepping them locally. Academic coverage is good;
+vendor coverage is uneven and **conference talks are effectively unsearched**. JFrog's
+help site could not be opened at all. Second, the design called for twelve adversarial
+verifiers and four critics; session limits killed them repeatedly and the pass was
+re-scoped to four attackers aimed only at the claims that rest on absence. This part
+therefore has **less adversarial coverage than Part III**, in a different shape, and a
+`partial` here is worth less than a `partial` there.
+
+## The answer
+
+| direction | verdict |
+|---|---|
+| the private registry as the control point | **exists** |
+| anomaly at the moment a range becomes a number | **partial** |
+| slopsquatting — are hallucinated names being registered, and how fast | **partial** |
+| the payload discontinuity inside one artifact | **exists** |
+
+The two `partial`s are narrow compositions of published parts, and in both cases other
+people have already announced the work. The useful output of this part is not a
+direction to build; it is three corrections, below.
+
+## Three corrections this forced
+
+**1. `detectSemverAbuse` is a re-implementation of a shipped Socket alert.**
+`future-vectors.ts` compares consecutive published versions for an anomalous jump.
+Socket's `semverAnomaly` alert, recovered from a 2023-01-27 Wayback snapshot, carries
+the props `prevVersion` / `newVersion` and the description: *"Package semver skipped
+several versions, this could indicate a dependency confusion attack or indicate the
+intention of disruptive breaking changes or major priority shifts for the project."*
+That is the same comparison, the same two operands and the same stated motive, shipped
+and archived four years ago. The signal is unwired, so nothing has to be retracted —
+but it should not be described as ours.
+
+**2. "Nobody watches the moment a range becomes a number" is false and must not be
+published.** npm, pnpm, Yarn, Bun and Deno all filter the candidate set *during*
+resolution: npm's `min-release-age` hands the cutoff to pacote when the packument is
+fetched ([npm/cli#8965](https://github.com/npm/cli/pull/8965)), so a too-new version
+ceases to exist for the reifier. Above the client, JFrog's *Compliant Version
+Selection* and Sonatype's *PCCS* rewrite the packument mid-resolution so the
+non-compliant version is never in the resolver's search space, and npm is singled out
+for default-on treatment with metadata attacks as the stated reason. The defensible
+sentence is much narrower: **everybody instruments the resolution; the only predicates
+anyone has attached to it are a clock and a blocklist.**
+
+**3. The corpus for the payload direction does not exist as described.** Detailed under
+direction 4. The short version: the "68 captures with bytes" are `0.0.1-security`
+placeholders with no bytes of interest, and the flagship set is missing the payload by
+the project's own conclusion.
+
+## 1. The defender is not the installer — **exists**
+
+The premise was that the private registry is another layer rather than a competitor,
+and therefore unexplored. It is neither. Registry-side admission is a mature commercial
+category with a vendor-neutral name — *dependency firewall*, *curation* — and the
+sharper sub-question, whether anyone analyses in the proxy instead of the client, has
+at least five built implementations behind it.
+
+On Verdaccio specifically, the layer this project already stood up a fixture for:
+`@verdaccio/package-filter` is a **first-party plugin present in the stock
+`config.yaml`**, filtering by name, scope, version, date and `minAgeDays`. It landed
+via [PR #5786](https://github.com/verdaccio/verdaccio/pull/5786) wired into the storage
+layer, so it covers the tarball-download path and uplink sync rather than the manifest
+alone. The request history runs to six years — issue #1847 (2020), #3562 (2023),
+Discussion #5386 (2025) — and at least eight independent implementations exist beside
+it, including `verdaccio-plugin-delay-filter`, `verdaccio-plugin-secfilter`,
+[SocialGouv/no-package-malware](https://github.com/SocialGouv/no-package-malware) and
+[berkotako/embargo](https://github.com/berkotako/embargo).
+
+Above it: JFrog Curation blocks per npm remote repository on the download request and
+handles the retroactive case (packages already cached before the verdict existed);
+Sonatype Repository Firewall has a policy stage named `PROXY` and a
+*Component-Unknown* default-deny; Socket Firewall ships a Registry Mode and prices it
+against its client-side wrapper as a different product. In the literature, OSCAR
+([ASE 2024](https://arxiv.org/abs/2409.09356)) is an 18-month production deployment of
+malware analysis in an enterprise mirror layer, and MalOSS recommended exactly this
+relocation five years ago.
+
+The measurement gap that appeared to survive did not. It was that nobody publishes what
+each package manager *does* against a filtering registry. The adversarial pass broke it:
+[Chainguard Libraries](https://edu.chainguard.dev/chainguard/libraries/troubleshooting/errors/)
+publishes a documentation section headed *"Package manager behavior"* spanning npm,
+pnpm, yarn, pip, uv, poetry, Maven and Gradle, with distinct error semantics per manager
+(npm surfaces a 403 with the reason; others report a generic no-matching-version);
+its [build-configuration page](https://edu.chainguard.dev/chainguard/libraries/javascript/build-configuration/)
+covers npm, pnpm, Yarn **and Bun**, including the lockfile-pinned case.
+[SafeDep pmg](https://github.com/safedep/pmg/blob/main/docs/dependency-cooldown.md)
+documents the bypass this project would have had to discover — metadata filtering
+*"does not apply to direct tarball installs or workflows that already have a resolved
+tarball URL (e.g. lockfile or cache scenarios)"* — and Endor Labs' *Customer Zero* post
+publishes operational figures for a registry-side policy (~135 suppressed versions/day,
+~1 event per developer, blocked installs "almost non-existent" after curation shipped),
+against the claim that no false-block rate had been published for any such policy.
+
+What is left is thin and it is the same shape as every part before this one: the
+per-manager descriptions are **categorical, not measured** — no rates, no paired
+head-to-head of proxy-side against client-side enforcement on a shared corpus. That is
+a measurement, not a tool, and it is worth less than it looks now that the behaviour
+itself is documented.
+
+## 2. The resolution, not the package — **partial**
+
+Every component of this direction is published. The resolution event has been
+instrumented and replayed historically at ecosystem scale — Pinckney et al.
+([MSR 2023](https://arxiv.org/abs/2304.00394)) shipped a time-travelling npm resolver
+built *"to observe how a package's dependencies would have been solved at arbitrary
+points in NPM's history"* and ran it over 888,294 update flows; He et al.
+([*Pinning Is Futile*, FSE 2025](https://arxiv.org/abs/2502.06662)) reuse the technique
+under an explicit supply-chain threat model. Five package managers and three proxies
+gate at resolution time. And the anomalous-version predicate itself has shipped since
+2022 as Socket's `semverAnomaly` — correction 1 above.
+
+The cooldown contrast the direction leans on does not hold cleanly either. npm's
+`min-release-age` and pnpm's `minimumReleaseAge` are not a wait bolted on beside
+resolution; they are a filter *on the candidate set during* resolution, and the
+user-visible artifact is a resolution failure on a date cutoff
+([npm/cli#9891](https://github.com/npm/cli/issues/9891)).
+
+The one surviving composition: **conditioning the judgement on the declared range**, and
+scoring one resolution as an outlier against the distribution of concrete versions that
+same range — or the same `(dependent, dependency, constraint)` edge — has resolved to
+over time. Every distribution in published work sits on an adjacent axis: over declared
+constraint *types* per package (Decan & Mens), over constraint types per year (He et
+al.), over adoption and CI-pass rates across a consumer population (Renovate Merge
+Confidence, Dependabot compatibility), over update feature vectors (Garrett et al.).
+The only shipped magnitude test on a resolved number is Renovate's `maxMajorIncrement`,
+and reading the source settles it: `default: 500`, major-only, and its documented
+purpose is *"preventing upgrades from SemVer-based versions to CalVer-based ones"* —
+for `19.0.0` it filters `999.0.0` and `2025.0.0`. A `^1.0.0` resolving to `99.9.1` is a
+major delta of 98 and passes.
+
+The adversarial pass broke the general form of this residual at the layer where it was
+most likely to break. Keeping a record of what a mutable reference previously resolved
+to and firing when it later resolves to something else is shipped, default-on and
+documented at both analogous layers: [Docker Scout](https://docs.docker.com/scout/policy/)'s
+built-in *No outdated base images* policy (tag → digest), StepSecurity Artifact Monitor's
+[tag-movement detection](https://www.stepsecurity.io/blog/suspicious-tag-movement-in-aws-github-action)
+(Git ref → commit), with Chainguard's
+[tlogistry](https://www.chainguard.dev/unchained/transparently-immutable-tags-using-sigstores-rekor)
+(2022) as the earlier published design. All three compare against the single most recent
+recorded resolution by binary equality; none scores against a *distribution*, and none
+involves version-number magnitude. That is the whole of what survives.
+
+Worth recording as a negative: Maven and Go answer the same threat **structurally**
+rather than by anomaly scoring — `maven-enforcer`'s `banDynamicVersions` removes ranges
+outright, and Go's minimal version selection means a rogue high version is not selected
+unless something explicitly requires it. The absence of an anomaly check there is by
+design, not by oversight, which is an argument against the composition rather than an
+opening for it.
+
+## 3. Slopsquatting — **partial**
+
+This was the direction expected to point at something not already taken. It is the only
+one whose residual survived the adversarial pass, and it survives into occupied ground.
+
+The cross-reference is published, and it is answered in the negative. Okwor,
+[*From Hallucination to Registration*](https://doi.org/10.5281/zenodo.21199427)
+(2026-07-05), takes hallucinated-name lists, cross-references them against the live
+registry, pulls true first-registration timestamps (`npm time.created`, PyPI minimum
+upload time) and adjudicates registrant intent: **22 of 149 anchor names registered,
+zero malicious, and zero of 1,641 self-generated names claimed by anyone.** The method
+is runnable at [slopsquatting-census](https://github.com/OrygnsCode/slopsquatting-census).
+Socket's [53 slopsquatting targets across 5 frontier LLMs](https://socket.dev/blog/slopsquatting-targets-across-frontier-llms)
+(2026-07-22) reports the same shape with the same malicious count of zero, and the
+TOSEM [*Phantoms*](https://doi.org/10.1145/3830237) paper (2026-07-28) runs the clock
+the other way — registration to victim install — with the researchers as registrants.
+
+The latency half has a name and a published method, but for the wrong objects: Unit 42's
+[Phantom Squatting](https://unit42.paloaltonetworks.com/phantom-squatting-hallucinated-web-domains/)
+(2026-06-30) defines the *adversarial exploitation window* and reports 23/35/40/45/51
+days plus one case of −11 months, for **DNS domains**, stating that it focuses
+exclusively on domain hallucinations and web infrastructure. For package registries the
+entire dated record is n=1: `react-codeshift`, emitted 2025-10-17, npm-created
+2026-01-14 — about 89 days — and [the claimant was a defender](https://www.aikido.dev/blog/agent-skills-spreading-hallucinated-npx-commands),
+so it measures how long a name sat unclaimed, not attacker latency.
+
+So the residual is real: nobody has published a population-scale registration-latency
+distribution for package names, including the negative arm where registration precedes
+hallucination. Three things make it a poor place to spend eight to twelve days.
+
+It is already staked, three times over. Churilov's revalidation of his 127-name list is
+[announced as in progress](https://github.com/churik5/slopsquatting-replication-2026);
+Okwor's paper names a "prospective watch" re-checking his 1,641-name corpus as its
+follow-up; and [slopclock](https://github.com/slopclock/slopclock) (2026-08-24) exists
+to track *"which AI-hallucinated package and domain names get registered"*. All three
+parties already hold the corpora.
+
+The emission-side timestamps are also published, contrary to what the direction assumed:
+the [DepScope Hallucinations Dataset](https://github.com/cuttalo/depscope-hallucinations-dataset)
+carries 161 re-verified names across 18-19 ecosystems, each with an ISO-8601
+`first_seen_at` drawn from production coding-agent traffic, with daily snapshots. It
+does not join to registry timestamps — names are dropped from the corpus once they
+resolve, rather than dated — so the join is open, but the hard half of the input is not
+ours to produce.
+
+And the expected answer is the null. Every measurement so far reports zero malicious
+registrations. Our corpus would most likely reproduce that, at lower power.
+
+One thing here is genuinely unclaimed and cheaper than the latency study: **PhantomRaven's
+slopsquatting attribution has never been checked against model output.** Koi's
+126-package claim rests on name shape alone, with no cross-reference to any hallucination
+corpus and no per-package registration dates — and CSA says the same of the ~800-package
+Flooding Dropper campaign. A result that those names are *not* model-emitted would be a
+correction to the vendor record. It is also the campaign that caused this project's near
+miss, which is either fitting or a reason for suspicion about the motive.
+
+## 4. The payload discontinuity — **exists**
+
+Published at three separate layers, the oldest of them twenty-one years old.
+
+Intra-artifact multi-origin segmentation: Meng & Miller,
+[*Identifying Multiple Authors in a Binary Program*](https://doi.org/10.1007/978-3-319-66399-9_16)
+(ESORICS 2017), takes one shipped artifact, segments it and attributes each region to a
+different author, with scaffolding separated from hand-written code; their multi-toolchain
+follow-up states the supply-chain motivation as settled background. [Multi-χ](https://doi.org/10.2478/popets-2020-0044)
+(PoPETs 2020) is the source-code form, segmenting one file by authorship. OCEAN states
+this direction's hypothesis almost verbatim — that a function injected by an attacker
+differs in style from the surrounding code.
+
+The within-family variance inversion: [Polygraph](https://doi.org/10.1109/sp.2005.15)
+(IEEE S&P 2005) partitions a set of artifacts that should be "the same thing" into
+invariant and variable regions. Google ships [VxSig](https://github.com/google/vxsig)
+to do it over malware families. The direction inverts which half is interesting —
+payload as the variable part rather than signature as the invariant — but the partition
+is the published object.
+
+Campaign clustering: ACME ([arXiv 2011.02235](https://arxiv.org/abs/2011.02235), 2020)
+states the premise in its abstract. More pointedly, DataDog's own GuardDog ships
+[`evals/cluster.py` with a checked-in cluster index](https://github.com/DataDog/guarddog/tree/v3/evals),
+running package similarity clustering **over the exact corpus this project uses**, and
+`recall.py` consumes it via `--max-per-cluster` to dedupe campaign siblings. The
+non-independence correction is already applied there by the corpus's maintainer.
+
+Injected-code detection is shipped too: GuardDog's `repository_integrity_mismatch`
+hashes every file in the source repo against the published package and flags what
+differs or appears only in the tarball; Microsoft's OSSGadget `oss-reproducible`
+rebuilds the package and judges whether the differences are meaningful; LastPyMile and
+[*On the feasibility of detecting injections in malicious npm packages*](https://doi.org/10.1145/3538969.3543815)
+(2022) do the invariant/variable partition on npm tarballs specifically.
+
+One narrow shape did survive, and it survived on unusually good evidence — complete
+catalogue enumeration rather than absence of search hits: all 90 Socket alert slugs,
+GuardDog's full `RULES.md`, all 36 Phylum analytics and all 402 ReversingLabs Spectra
+Assure pages (including a category named *Anomaly* holding 141 indicators) were pulled
+and grepped for comparative language. **No shipped scanner alert has the form "this file
+is unlike the rest of this package."** Every published baseline is external: the source
+repo, version N−1, or a known-bad corpus. The package as its own control is the one
+arrangement not found. Socket's `gptAnomaly` is the nearest thing and is an opaque LLM
+review of package contents, so it cannot be ruled out as already doing this internally.
+
+### The corpus does not support it, independently of prior art
+
+This matters more than the verdict, and it is a repo finding rather than a search result.
+
+The direction says it applies to "the 68 captures with bytes". Those are two different
+numbers. `audit-a5.md:1332`: the 68 are captures resolving to the **registry identity**,
+and *"all 68 are `0.0.1-security` placeholders"* — empty stubs, already excluded from
+the A5 control arm as withdrawn. There is no payload in any of them. The real with-bytes
+corpus is **56** (`commands.md:575`), of which **36 belong to one package's
+republication series**, `@siwatfa/yorn` — which holds 56 captures of its own and 36
+with bytes, the shortfall being twenty early versions from 1.0.1 to 1.0.30 that a
+sweep took (`audit-a5.md:483`). That leaves 20 with-bytes captures across the other 14
+packages.
+
+But 56 is the wrong unit anyway. The unit for this analysis is the set that should be
+identical — the burst family — and `metadata-results/metadata-2026-08-20-v1.4.0.json`
+lists exactly **8 malicious families across 6 distinct publishers**, only two of which
+have five members (`whltd4` ×5 over 8.35 min, `javonayers999` ×5 over 4.24 min); the
+rest are pairs and one triple, and `whltd4` and `ferrousdev` each appear twice. The
+honest n is eight sets, not independent of one another.
+
+The flagship set is worse than small. D16 (`audit-a5.md:1496`) already concluded that
+the five lock packages **are the decoys**, and that `mutex-forge` — 664KB, with a
+repository field, scored 10 and rejected by the class filter — is the carrier they all
+depend on, and it was never captured. The direction proposes finding the payload in what
+varies inside a set that should be identical. The project does not hold the payload for
+its own flagship set. What varies across the five is names, versions and a few hundred
+bytes of scaffolding. Finding nothing there would be the correct result.
+
+Three further problems, each sufficient alone. **Size**: the five tarballs are 3084,
+4010, 3825, 3578 and 3517 bytes, so on the order of one to three kilobytes of JavaScript
+each after `package.json`, README and LICENSE — Meng & Miller work at function
+granularity in binaries orders of magnitude larger, and fragment-granularity provenance
+is presented in that literature as a hard problem. **Censored set**: `shared-slot-gate`
+and `async-lock-queue` 404ed before capture (`audit-a5.md:1475`), so the analysis would
+run over five of at least seven known members, with the missing two selected by a race
+condition rather than at random. **Non-independence**, which this project has already
+formalised against itself: `design-effect.md` establishes the DataDog corpus has ~56
+independent observations rather than 1,001, design effect 25.8, called a lower bound.
+Five packages from one account in four minutes is one observation by that standard.
+
+What could honestly be run is a descriptive note showing the shared/varying partition
+across the five decoys, labelled as one account, one four-minute burst, five artifacts
+of 3-4KB, two family members missing, payload absent. That is a corpus observation, not
+a detection method.
+
+## What was not found
+
+Same standard as Parts I to III, with the method defects above subtracted: 24 lanes,
+four syntheses, four adversarial attackers, and absence at that depth is weak evidence
+of absence — weaker here than in Part III, because the vendor channel was worked by
+sitemap crawling rather than search and conference talks were not covered at all.
+
+1. **No per-range resolution baseline.** Nobody scores a resolution against the
+   distribution of versions that same range or edge has historically resolved to. The
+   analogous controls at the container-tag and Git-ref layers all compare against the
+   single most recent resolution by equality, not against a distribution.
+2. **No registration-latency distribution for package names.** Published for DNS domains
+   with a named metric; for packages the dated record is n=1 and the registrant was a
+   defender. Three parties who hold the corpora have announced this work.
+3. **No verification of PhantomRaven's or Flooding Dropper's names against model output.**
+   Both slopsquatting attributions rest on name shape alone.
+4. **No shipped alert of the form "this file is unlike the rest of this package."**
+   Verified by enumerating four complete vendor catalogues, not by failing to find one.
+   The idea it would instantiate is published; the self-referential baseline is not
+   shipped.
+5. **No measured per-manager outcomes against a filtering registry.** The behaviour is
+   now documented in several places; what is absent is rates rather than descriptions.
+
+Items 1 and 4 are compositions of published parts. Item 2 is claimed by three other
+parties and its expected answer is a null. Item 3 is a correction to somebody else's
+record and is the cheapest thing on this list. Item 5 is a measurement, which is where
+Parts II and III also ended.
+
+None of the four directions is a place to build a tool.
+
+## Sources
+
+- [@verdaccio/package-filter](https://github.com/verdaccio/verdaccio/blob/master/packages/plugins/package-filter/README.md) · [PR #5786](https://github.com/verdaccio/verdaccio/pull/5786) · [verdaccio-plugin-delay-filter](https://github.com/kevinclerc/verdaccio-plugin-delay-filter) · [SocialGouv/no-package-malware](https://github.com/SocialGouv/no-package-malware) · [berkotako/embargo](https://github.com/berkotako/embargo)
+- [Sonatype Firewall Quarantine](https://help.sonatype.com/en/firewall-quarantine.html) · [Socket Firewall](https://docs.socket.dev/docs/socket-firewall) · [Chainguard Libraries — package manager behavior](https://edu.chainguard.dev/chainguard/libraries/troubleshooting/errors/) · [Endor Labs Customer Zero](https://www.endorlabs.com/learn/customer-zero-implementing-package-firewall-at-endor-labs) · [safedep/pmg dependency-cooldown](https://github.com/safedep/pmg/blob/main/docs/dependency-cooldown.md)
+- [OSCAR (ASE 2024)](https://arxiv.org/abs/2409.09356) · [Bad Snakes (ICSE 2023)](https://doi.org/10.1109/ICSE48619.2023.00052) · [Amalfi (ICSE 2022)](https://doi.org/10.1145/3510003.3510104) · [MalOSS (NDSS 2021)](https://arxiv.org/abs/2002.01139)
+- [Pinckney et al., MSR 2023](https://arxiv.org/abs/2304.00394) · [He et al., *Pinning Is Futile*, FSE 2025](https://arxiv.org/abs/2502.06662) · [npm/cli#8965 min-release-age](https://github.com/npm/cli/pull/8965) · [Renovate maxMajorIncrement](https://docs.renovatebot.com/configuration-options/#maxmajorincrement) · [Docker Scout policy](https://docs.docker.com/scout/policy/) · [StepSecurity tag movement](https://www.stepsecurity.io/blog/suspicious-tag-movement-in-aws-github-action) · [Chainguard tlogistry](https://www.chainguard.dev/unchained/transparently-immutable-tags-using-sigstores-rekor)
+- [Okwor, *From Hallucination to Registration*](https://doi.org/10.5281/zenodo.21199427) · [slopsquatting-census](https://github.com/OrygnsCode/slopsquatting-census) · [Unit 42 Phantom Squatting](https://unit42.paloaltonetworks.com/phantom-squatting-hallucinated-web-domains/) · [Socket — 53 slopsquatting targets](https://socket.dev/blog/slopsquatting-targets-across-frontier-llms) · [TOSEM *Phantoms*](https://doi.org/10.1145/3830237) · [Churilov, *The Range Shrinks*](https://arxiv.org/abs/2605.17062) · [DepScope dataset](https://github.com/cuttalo/depscope-hallucinations-dataset) · [Aikido — hallucinated npx commands](https://www.aikido.dev/blog/agent-skills-spreading-hallucinated-npx-commands) · [slopclock](https://github.com/slopclock/slopclock) · [Spracklen et al., USENIX Security 2025](https://arxiv.org/abs/2406.10279)
+- [Meng & Miller, ESORICS 2017](https://doi.org/10.1007/978-3-319-66399-9_16) · [Multi-χ, PoPETs 2020](https://doi.org/10.2478/popets-2020-0044) · [Polygraph, IEEE S&P 2005](https://doi.org/10.1109/sp.2005.15) · [google/vxsig](https://github.com/google/vxsig) · [ACME](https://arxiv.org/abs/2011.02235) · [GuardDog evals/cluster.py](https://github.com/DataDog/guarddog/tree/v3/evals) · [LastPyMile](https://doi.org/10.1145/3468264.3468592) · [*Detecting injections in malicious npm packages*](https://doi.org/10.1145/3538969.3543815) · [OSSGadget oss-reproducible](https://github.com/microsoft/OSSGadget/wiki/OSS-Reproducible) · [Aura](https://github.com/SourceCode-AI/aura)
+- Socket `semverAnomaly`, recovered from the Wayback Machine snapshot of 2023-01-27 (`web.archive.org/web/20230127004927/https://socket.dev/npm/issue/semverAnomaly`); the alert is no longer at that path.
